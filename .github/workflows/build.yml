@@ -62,6 +62,7 @@ jobs:
       shell: cmd
       run: |
         cl /LD /EHsc /O2 /std:c++17 /I"sdk" Loader\dllmain.cpp /link /LIBPATH:"sdk" nethost.lib ScriptHookV.lib /OUT:output\MiniDotNet.asi
+        copy /Y sdk\nethost.dll output\nethost.dll
 
     - name: Upload Built Mod Artifacts
       uses: actions/upload-artifact@v4

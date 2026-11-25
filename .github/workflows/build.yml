@@ -21,9 +21,14 @@ jobs:
     - name: Download ScriptHookV SDK & nethost
       shell: pwsh
       run: |
-        New-Item -ItemType Directory -Force -Path "sdk"
-        Invoke-WebRequest -Uri "http://dev-c.com" -OutFile "sdk/shv.zip" -UserAgent "Mozilla/5.0"
-        Expand-Archive -Path "sdk/shv.zip" -DestinationPath "sdk/shv" -Force
+        New-Item -ItemType Directory -Force -Path "sdk\shv\inc"
+        New-Item -ItemType Directory -Force -Path "sdk\shv\lib"
+        
+        Invoke-WebRequest -Uri "https://githubusercontent.com" -OutFile "sdk\shv\inc\main.h"
+        Invoke-WebRequest -Uri "https://githubusercontent.com" -OutFile "sdk\shv\inc\types.h"
+        Invoke-WebRequest -Uri "https://githubusercontent.com" -OutFile "sdk\shv\inc\enums.h"
+        Invoke-WebRequest -Uri "https://githubusercontent.com" -OutFile "sdk\shv\inc\natives.h"
+        Invoke-WebRequest -Uri "https://githubusercontent.com" -OutFile "sdk\shv\lib\ScriptHookV.lib"
         
         $dotnetRoot = (Get-Command dotnet).Source | Split-Path
         $nethostDir = Get-ChildItem -Path "$dotnetRoot\packs\Microsoft.NETCore.App.Host.win-x64" -Recurse -Filter "nethost.h" | Select-Object -First 1 -ExpandProperty DirectoryName
@@ -49,4 +54,3 @@ jobs:
       with:
         name: GTAV-MiniDotNet-Release
         path: output/
-        

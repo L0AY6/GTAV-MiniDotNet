@@ -1,0 +1,52 @@
+name: Build GTAV MiniDotNet Loader
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup .NET 8 SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Download ScriptHookV SDK & nethost
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path "sdk"
+        Invoke-WebRequest -Uri "http://dev-c.com" -OutFile "sdk/shv.zip" -UserAgent "Mozilla/5.0"
+        Expand-Archive -Path "sdk/shv.zip" -DestinationPath "sdk/shv" -Force
+        
+        $dotnetRoot = (Get-Command dotnet).Source | Split-Path
+        $nethostDir = Get-ChildItem -Path "$dotnetRoot\packs\Microsoft.NETCore.App.Host.win-x64" -Recurse -Filter "nethost.h" | Select-Object -First 1 -ExpandProperty DirectoryName
+        Copy-Item "$nethostDir\*" -Destination "sdk/" -Force
+
+    - name: Build C# Core Bridge (MiniDotNet.Core.dll)
+      shell: pwsh
+      run: |
+        dotnet publish CoreBridge/MiniDotNet.Core.csproj -c Release -r win-x64 --self-contained false -o output/scripts
+
+    - name: Setup MSVC Compiler
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    - name: Compile C++ ASI Loader (MiniDotNet.asi)
+      shell: cmd
+      run: |
+        cl /LD /EHsc /O2 /std:c++17 /I"sdk" /I"sdk\shv\inc" Loader\dllmain.cpp /link /LIBPATH:"sdk" /LIBPATH:"sdk\shv\lib" nethost.lib ScriptHookV.lib /OUT:output\MiniDotNet.asi
+
+    - name: Upload Built Mod Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: GTAV-MiniDotNet-Release
+        path: output/
+        

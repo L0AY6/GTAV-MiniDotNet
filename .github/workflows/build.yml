@@ -31,7 +31,7 @@ jobs:
         $mainH = @"
         #pragma once
         #include <windows.h>
-        #define IMPORT __declspec(dllimport)
+        #define IMPORT extern "C" __declspec(dllimport)
         IMPORT void scriptRegister(HMODULE module, void(*LP_SCRIPT_MAIN)());
         IMPORT void scriptUnregister(HMODULE module);
         IMPORT void scriptWait(DWORD time);

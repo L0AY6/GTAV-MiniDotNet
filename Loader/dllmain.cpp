@@ -3,7 +3,6 @@
 #include <filesystem>
 #include <fstream>
 #include "main.h"
-#include "nethost.h"
 #include "coreclr_delegates.h"
 #include "hostfxr.h"
 
@@ -20,19 +19,33 @@ void LogMessage(const std::string& msg) {
     }
 }
 
+fs::path FindHostFxrPath() {
+    fs::path baseDir = L"C:\\Program Files\\dotnet\\host\\fxr";
+    if (!fs::exists(baseDir)) return L"";
+
+    fs::path latestFxr = L"";
+    for (const auto& entry : fs::directory_iterator(baseDir)) {
+        if (entry.is_directory()) {
+            fs::path candidate = entry.path() / "hostfxr.dll";
+            if (fs::exists(candidate)) {
+                latestFxr = candidate;
+            }
+        }
+    }
+    return latestFxr;
+}
+
 bool InitializeDotNet8() {
-    char_t buffer[MAX_PATH];
-    size_t buffer_size = sizeof(buffer) / sizeof(char_t);
-    
-    int rc = get_hostfxr_path(buffer, &buffer_size, nullptr);
-    if (rc != 0) {
-        LogMessage("[ERROR] Could not find .NET 8 hostfxr.dll. Ensure .NET 8 Desktop Runtime x64 is installed.");
+    fs::path hostfxrPath = FindHostFxrPath();
+    if (hostfxrPath.empty()) {
+        LogMessage("[ERROR] hostfxr.dll not found in C:\\Program Files\\dotnet\\host\\fxr");
         return false;
     }
 
-    g_HostFxrLib = LoadLibraryW(buffer);
+    LogMessage("[INFO] Found hostfxr at: " + hostfxrPath.string());
+    g_HostFxrLib = LoadLibraryW(hostfxrPath.c_str());
     if (!g_HostFxrLib) {
-        LogMessage("[ERROR] Failed to load hostfxr.dll into memory.");
+        LogMessage("[ERROR] LoadLibraryW failed for hostfxr.dll. Error code: " + std::to_string(GetLastError()));
         return false;
     }
 
@@ -54,7 +67,7 @@ bool InitializeDotNet8() {
     }
 
     hostfxr_handle cxt = nullptr;
-    rc = init_fptr(runtimeConfig.c_str(), nullptr, &cxt);
+    int rc = init_fptr(runtimeConfig.c_str(), nullptr, &cxt);
     if (rc != 0 || cxt == nullptr) {
         LogMessage("[ERROR] hostfxr_initialize_for_runtime_config failed with code: " + std::to_string(rc));
         if (cxt) close_fptr(cxt);

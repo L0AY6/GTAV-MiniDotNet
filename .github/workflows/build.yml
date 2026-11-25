@@ -18,18 +18,37 @@ jobs:
       with:
         dotnet-version: '8.0.x'
 
-    - name: Download ScriptHookV SDK & nethost
+    - name: Setup MSVC Compiler
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x64
+
+    - name: Generate Local ScriptHookV SDK & Copy nethost
       shell: pwsh
       run: |
-        New-Item -ItemType Directory -Force -Path "sdk\shv\inc"
-        New-Item -ItemType Directory -Force -Path "sdk\shv\lib"
+        New-Item -ItemType Directory -Force -Path "sdk"
         
-        Invoke-WebRequest -Uri "https://githubusercontent.com" -OutFile "sdk\shv\inc\main.h"
-        Invoke-WebRequest -Uri "https://githubusercontent.com" -OutFile "sdk\shv\inc\types.h"
-        Invoke-WebRequest -Uri "https://githubusercontent.com" -OutFile "sdk\shv\inc\enums.h"
-        Invoke-WebRequest -Uri "https://githubusercontent.com" -OutFile "sdk\shv\inc\natives.h"
-        Invoke-WebRequest -Uri "https://githubusercontent.com" -OutFile "sdk\shv\lib\ScriptHookV.lib"
-        
+        $mainH = @"
+        #pragma once
+        #include <windows.h>
+        #define IMPORT __declspec(dllimport)
+        IMPORT void scriptRegister(HMODULE module, void(*LP_SCRIPT_MAIN)());
+        IMPORT void scriptUnregister(HMODULE module);
+        IMPORT void scriptWait(DWORD time);
+        #define WAIT scriptWait
+        "@
+        Set-Content -Path "sdk\main.h" -Value $mainH
+
+        $defFile = @"
+        LIBRARY ScriptHookV
+        EXPORTS
+            scriptRegister
+            scriptUnregister
+            scriptWait
+        "@
+        Set-Content -Path "sdk\ScriptHookV.def" -Value $defFile
+        cmd /c "lib /def:sdk\ScriptHookV.def /out:sdk\ScriptHookV.lib /machine:x64"
+
         $dotnetRoot = (Get-Command dotnet).Source | Split-Path
         $nethostDir = Get-ChildItem -Path "$dotnetRoot\packs\Microsoft.NETCore.App.Host.win-x64" -Recurse -Filter "nethost.h" | Select-Object -First 1 -ExpandProperty DirectoryName
         Copy-Item "$nethostDir\*" -Destination "sdk/" -Force
@@ -39,15 +58,10 @@ jobs:
       run: |
         dotnet publish CoreBridge/MiniDotNet.Core.csproj -c Release -r win-x64 --self-contained false -o output/scripts
 
-    - name: Setup MSVC Compiler
-      uses: ilammy/msvc-dev-cmd@v1
-      with:
-        arch: x64
-
     - name: Compile C++ ASI Loader (MiniDotNet.asi)
       shell: cmd
       run: |
-        cl /LD /EHsc /O2 /std:c++17 /I"sdk" /I"sdk\shv\inc" Loader\dllmain.cpp /link /LIBPATH:"sdk" /LIBPATH:"sdk\shv\lib" nethost.lib ScriptHookV.lib /OUT:output\MiniDotNet.asi
+        cl /LD /EHsc /O2 /std:c++17 /I"sdk" Loader\dllmain.cpp /link /LIBPATH:"sdk" nethost.lib ScriptHookV.lib /OUT:output\MiniDotNet.asi
 
     - name: Upload Built Mod Artifacts
       uses: actions/upload-artifact@v4

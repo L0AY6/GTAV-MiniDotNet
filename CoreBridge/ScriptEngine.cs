@@ -45,7 +45,7 @@ namespace MiniDotNet.Core
         public static int[] GetAllVehicleHandles()
         {
             if (_worldGetAllVeh == null) return Array.Empty<int>();
-            int[] buffer = new int[256];
+            int[] buffer = (int[])Array.CreateInstance(typeof(int), 256);
             int count = _worldGetAllVeh(buffer, 256);
             if (count <= 0) return Array.Empty<int>();
             int[] result = new int[count];

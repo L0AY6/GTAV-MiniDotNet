@@ -31,7 +31,8 @@ jobs:
     - name: Compile C++ ASI Loader (MiniDotNet.asi)
       shell: cmd
       run: |
-        cl /LD /EHsc /O2 /MT /std:c++17 Loader\dllmain.cpp /OUT:output\MiniDotNet.asi
+        if not exist output mkdir output
+        cl /LD /EHsc /O2 /MT /std:c++17 Loader\dllmain.cpp /Fe:output\MiniDotNet.asi
 
     - name: Upload Built Mod Artifacts
       uses: actions/upload-artifact@v4

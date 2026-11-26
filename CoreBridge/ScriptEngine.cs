@@ -6,10 +6,37 @@ using System.Collections.Generic;
 
 namespace MiniDotNet.Core
 {
-    public static class ScriptEngine
+    public static unsafe class ScriptEngine
     {
         private static bool _initialized = false;
         private static readonly List<MethodInfo> _scriptTickMethods = new List<MethodInfo>();
+
+        private static delegate* unmanaged[Cdecl]<ulong, void> _nativeInit;
+        private static delegate* unmanaged[Cdecl]<ulong, void> _nativePush64;
+        private static delegate* unmanaged[Cdecl]<ulong*> _nativeCall;
+
+        [UnmanagedCallersOnly]
+        public static void SetupNatives(IntPtr initPtr, IntPtr pushPtr, IntPtr callPtr)
+        {
+            _nativeInit = (delegate* unmanaged[Cdecl]<ulong, void>)initPtr;
+            _nativePush64 = (delegate* unmanaged[Cdecl]<ulong, void>)pushPtr;
+            _nativeCall = (delegate* unmanaged[Cdecl]<ulong*>)callPtr;
+            Log("[C# Bridge] Native pointers received successfully!");
+        }
+
+        public static ulong CallNative(ulong hash, params ulong[] args)
+        {
+            if (_nativeInit == null || _nativePush64 == null || _nativeCall == null)
+                return 0;
+
+            _nativeInit(hash);
+            for (int i = 0; i < args.Length; i++)
+            {
+                _nativePush64(args[i]);
+            }
+            ulong* result = _nativeCall();
+            return result != null ? *result : 0;
+        }
 
         [UnmanagedCallersOnly]
         public static void OnTick()
@@ -35,14 +62,10 @@ namespace MiniDotNet.Core
 
         private static void InitializeScripts()
         {
-            Log("=== MiniDotNet C# Engine (.NET 8) Initialized Successfully! ===");
+            Log("=== MiniDotNet C# Engine (.NET 8) Active Inside GTA V! ===");
             
             string scriptsPath = Path.Combine(Directory.GetCurrentDirectory(), "scripts");
-            if (!Directory.Exists(scriptsPath))
-            {
-                Directory.CreateDirectory(scriptsPath);
-                return;
-            }
+            if (!Directory.Exists(scriptsPath)) return;
 
             foreach (string dllFile in Directory.GetFiles(scriptsPath, "*.dll"))
             {
@@ -70,7 +93,7 @@ namespace MiniDotNet.Core
             }
         }
 
-        private static void Log(string message)
+        public static void Log(string message)
         {
             try
             {

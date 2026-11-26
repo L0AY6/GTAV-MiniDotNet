@@ -21,7 +21,7 @@ typedef void (__cdecl* init_native_fn)(void* init, void* push, void* call, void*
 typedef void (__cdecl* tick_fn)();
 
 tick_fn g_CoreTick = nullptr;
-tick_fn g_ModTicks;
+tick_fn* g_ModTicks = nullptr;
 int g_ModCount = 0;
 
 void LogMessage(const char* msg) {
@@ -49,13 +49,15 @@ void LoadPluginDll(const wchar_t* dllPath, bool isCore) {
     if (isCore) {
         g_CoreTick = tickFn;
         LogMessage("[SUCCESS] MiniDotNet Core Engine Active!");
-    } else if (g_ModCount < 32) {
+    } else if (g_ModTicks && g_ModCount < 32) {
         g_ModTicks[g_ModCount++] = tickFn;
         LogMessage("[SUCCESS] Loaded External AOT Mod Plugin!");
     }
 }
 
 void LoadAllPlugins() {
+    g_ModTicks = (tick_fn*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 32 * sizeof(tick_fn));
+
     wchar_t* currentDir = new wchar_t[MAX_PATH];
     GetCurrentDirectoryW(MAX_PATH, currentDir);
 

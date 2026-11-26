@@ -10,7 +10,7 @@ typedef void (*scriptWait_t)(DWORD);
 scriptWait_t pScriptWait = nullptr;
 
 typedef void (CORECLR_DELEGATE_CALLTYPE* tick_fn)();
-tick_fn g_ManagedTick = nullptr;
+volatile tick_fn g_ManagedTick = nullptr;
 HMODULE g_HostFxrLib = nullptr;
 
 void LogMessage(const char* msg) {
@@ -46,15 +46,18 @@ bool SearchFxrInBase(const wchar_t* baseDir, wchar_t* outPath) {
     return found;
 }
 
-bool InitializeDotNet8() {
+DWORD WINAPI DotNetInitThread(LPVOID lpParam) {
+    SetEnvironmentVariableW(L"DOTNET_GCHeapHardLimit", L"0x8000000");
+    SetEnvironmentVariableW(L"DOTNET_EnableWriteXorExecute", L"0");
+
     wchar_t* hostfxrPath = new wchar_t[MAX_PATH];
     if (!SearchFxrInBase(L"C:\\Program Files\\dotnet\\host\\fxr", hostfxrPath)) {
         delete[] hostfxrPath;
         LogMessage("[ERROR] hostfxr.dll not found in C:\\Program Files\\dotnet\\host\\fxr");
-        return false;
+        return 0;
     }
 
-    LogMessage("[INFO] Found hostfxr.dll in Program Files, loading...");
+    LogMessage("[BG Thread] Loading hostfxr.dll...");
     g_HostFxrLib = LoadLibraryW(hostfxrPath);
     delete[] hostfxrPath;
 
@@ -63,16 +66,17 @@ bool InitializeDotNet8() {
         sprintf_s(buf, 256, "[ERROR] LoadLibraryW failed. Error: %lu", GetLastError());
         LogMessage(buf);
         delete[] buf;
-        return false;
+        return 0;
     }
 
+    LogMessage("[BG Thread] hostfxr.dll loaded! Resolving functions...");
     auto init_fptr = (hostfxr_initialize_for_runtime_config_fn)GetProcAddress(g_HostFxrLib, "hostfxr_initialize_for_runtime_config");
     auto get_delegate_fptr = (hostfxr_get_runtime_delegate_fn)GetProcAddress(g_HostFxrLib, "hostfxr_get_runtime_delegate");
     auto close_fptr = (hostfxr_close_fn)GetProcAddress(g_HostFxrLib, "hostfxr_close");
 
     if (!init_fptr || !get_delegate_fptr || !close_fptr) {
         LogMessage("[ERROR] Failed to resolve hostfxr exports.");
-        return false;
+        return 0;
     }
 
     wchar_t* currentDir = new wchar_t[MAX_PATH];
@@ -87,8 +91,8 @@ bool InitializeDotNet8() {
     if (GetFileAttributesW(runtimeConfig) == INVALID_FILE_ATTRIBUTES || GetFileAttributesW(coreDll) == INVALID_FILE_ATTRIBUTES) {
         delete[] runtimeConfig;
         delete[] coreDll;
-        LogMessage("[ERROR] Missing MiniDotNet.Core.dll or runtimeconfig.json in scripts folder.");
-        return false;
+        LogMessage("[ERROR] Missing MiniDotNet.Core.dll or runtimeconfig.json.");
+        return 0;
     }
 
     hostfxr_initialize_parameters params = {};
@@ -96,6 +100,7 @@ bool InitializeDotNet8() {
     params.host_path = L"C:\\Program Files\\dotnet\\dotnet.exe";
     params.dotnet_root = L"C:\\Program Files\\dotnet";
 
+    LogMessage("[BG Thread] Initializing .NET 8 CoreCLR...");
     hostfxr_handle cxt = nullptr;
     int rc = init_fptr(runtimeConfig, &params, &cxt);
     delete[] runtimeConfig;
@@ -107,9 +112,10 @@ bool InitializeDotNet8() {
         LogMessage(buf);
         delete[] buf;
         if (cxt) close_fptr(cxt);
-        return false;
+        return 0;
     }
 
+    LogMessage("[BG Thread] CoreCLR initialized! Binding C# ScriptEngine...");
     load_assembly_and_get_function_pointer_fn load_assembly = nullptr;
     rc = get_delegate_fptr(cxt, hdt_load_assembly_and_get_function_pointer, (void**)&load_assembly);
     close_fptr(cxt);
@@ -117,34 +123,36 @@ bool InitializeDotNet8() {
     if (rc != 0 || !load_assembly) {
         delete[] coreDll;
         LogMessage("[ERROR] Failed to get load_assembly delegate.");
-        return false;
+        return 0;
     }
 
+    tick_fn tempTick = nullptr;
     rc = load_assembly(
         coreDll,
         L"MiniDotNet.Core.ScriptEngine, MiniDotNet.Core",
         L"OnTick",
         UNMANAGEDCALLERSONLY_METHOD,
         nullptr,
-        (void**)&g_ManagedTick
+        (void**)&tempTick
     );
     delete[] coreDll;
 
-    if (rc != 0 || !g_ManagedTick) {
+    if (rc != 0 || !tempTick) {
         char* buf = new char;
         sprintf_s(buf, 256, "[ERROR] Failed to bind C# OnTick. Code: %d", rc);
         LogMessage(buf);
         delete[] buf;
-        return false;
+        return 0;
     }
 
+    g_ManagedTick = tempTick;
     LogMessage("[SUCCESS] .NET 8 Runtime initialized and C# ScriptEngine bound successfully!");
-    return true;
+    return 0;
 }
 
 void ScriptMain() {
-    LogMessage("--- ScriptMain Started ---");
-    if (!InitializeDotNet8()) return;
+    LogMessage("--- ScriptMain Started (Non-Blocking) ---");
+    CreateThread(NULL, 0, DotNetInitThread, NULL, 0, NULL);
 
     while (true) {
         if (g_ManagedTick) {

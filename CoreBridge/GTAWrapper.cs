@@ -187,7 +187,7 @@ namespace GTA
         public float RollCenterHeightRear { get => ReadFloat(0xEC); set => WriteFloat(0xEC, value); }
     }
 
-    public unsafe class Vehicle
+        public unsafe class Vehicle
     {
         public int Handle { get; }
         public Vehicle(int handle) { Handle = handle; }

@@ -187,7 +187,7 @@ namespace GTA
         public float RollCenterHeightRear { get => ReadFloat(0xEC); set => WriteFloat(0xEC, value); }
     }
 
-        public unsafe class Vehicle
+    public unsafe class Vehicle
     {
         public int Handle { get; }
         public Vehicle(int handle) { Handle = handle; }
@@ -242,4 +242,5 @@ namespace GTA
         public event EventHandler? Tick;
         public void OnTickInternal() => Tick?.Invoke(this, EventArgs.Empty);
     }
-}
+                    }
+                    

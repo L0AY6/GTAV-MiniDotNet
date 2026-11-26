@@ -132,38 +132,29 @@ void ScriptMain() {
     }
 }
 
-DWORD WINAPI InitThread(LPVOID lpParam) {
-    HMODULE hMod = (HMODULE)lpParam;
-    LogMessage("--- MiniDotNet DLL Loaded Successfully! Waiting for ScriptHookV... ---");
-
-    HMODULE hSHV = NULL;
-    for (int i = 0; i < 50; i++) {
-        hSHV = GetModuleHandleA("ScriptHookV.dll");
-        if (hSHV) break;
-        Sleep(200);
-    }
-
-    if (!hSHV) {
-        LogMessage("[ERROR] ScriptHookV.dll not found in memory.");
-        return 0;
-    }
-
-    auto pRegister = (scriptRegister_t)GetProcAddress(hSHV, "?scriptRegister@@YAXPEAUHINSTANCE__@@P6AXXZ@Z");
-    pScriptWait = (scriptWait_t)GetProcAddress(hSHV, "?scriptWait@@YAXK@Z");
-
-    if (pRegister) {
-        LogMessage("[INFO] Registering script with ScriptHookV...");
-        pRegister(hMod, ScriptMain);
-    } else {
-        LogMessage("[ERROR] Could not find scriptRegister export in ScriptHookV.dll");
-    }
-    return 0;
-}
-
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
     if (ul_reason_for_call == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hModule);
-        CreateThread(NULL, 0, InitThread, hModule, 0, NULL);
+        LogMessage("--- MiniDotNet DLL Loaded! ---");
+
+        HMODULE hSHV = GetModuleHandleA("ScriptHookV.dll");
+        if (!hSHV) {
+            hSHV = LoadLibraryA("ScriptHookV.dll");
+        }
+
+        if (hSHV) {
+            auto pRegister = (scriptRegister_t)GetProcAddress(hSHV, "?scriptRegister@@YAXPEAUHINSTANCE__@@P6AXXZ@Z");
+            pScriptWait = (scriptWait_t)GetProcAddress(hSHV, "?scriptWait@@YAXK@Z");
+
+            if (pRegister) {
+                LogMessage("[INFO] Registering ScriptMain directly from DllMain...");
+                pRegister(hModule, ScriptMain);
+            } else {
+                LogMessage("[ERROR] Could not resolve scriptRegister.");
+            }
+        } else {
+            LogMessage("[ERROR] Could not load ScriptHookV.dll");
+        }
     }
     return TRUE;
 }

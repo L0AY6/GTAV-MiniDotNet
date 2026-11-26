@@ -46,34 +46,21 @@ bool SearchFxrInBase(const wchar_t* baseDir, wchar_t* outPath) {
     return found;
 }
 
-bool FindHostFxrPath(wchar_t* outPath) {
-    if (SearchFxrInBase(L"C:\\Program Files\\dotnet\\host\\fxr", outPath)) return true;
-    if (SearchFxrInBase(L"C:\\Program Files (x86)\\dotnet\\host\\fxr", outPath)) return true;
-    
-    wchar_t* currentDir = new wchar_t[MAX_PATH];
-    GetCurrentDirectoryW(MAX_PATH, currentDir);
-    swprintf_s(outPath, MAX_PATH, L"%s\\hostfxr.dll", currentDir);
-    delete[] currentDir;
-
-    if (GetFileAttributesW(outPath) != INVALID_FILE_ATTRIBUTES) return true;
-    return false;
-}
-
 bool InitializeDotNet8() {
     wchar_t* hostfxrPath = new wchar_t[MAX_PATH];
-    if (!FindHostFxrPath(hostfxrPath)) {
+    if (!SearchFxrInBase(L"C:\\Program Files\\dotnet\\host\\fxr", hostfxrPath)) {
         delete[] hostfxrPath;
-        LogMessage("[ERROR] hostfxr.dll not found in Program Files or Game Folder!");
+        LogMessage("[ERROR] hostfxr.dll not found in C:\\Program Files\\dotnet\\host\\fxr");
         return false;
     }
 
-    LogMessage("[INFO] Found hostfxr.dll, loading...");
+    LogMessage("[INFO] Found hostfxr.dll in Program Files, loading...");
     g_HostFxrLib = LoadLibraryW(hostfxrPath);
     delete[] hostfxrPath;
 
     if (!g_HostFxrLib) {
-        char* buf = new char[256];
-        sprintf_s(buf, 256, "[ERROR] LoadLibraryW failed for hostfxr.dll. Error: %lu", GetLastError());
+        char* buf = new char;
+        sprintf_s(buf, 256, "[ERROR] LoadLibraryW failed. Error: %lu", GetLastError());
         LogMessage(buf);
         delete[] buf;
         return false;
@@ -104,13 +91,18 @@ bool InitializeDotNet8() {
         return false;
     }
 
+    hostfxr_initialize_parameters params = {};
+    params.size = sizeof(hostfxr_initialize_parameters);
+    params.host_path = L"C:\\Program Files\\dotnet\\dotnet.exe";
+    params.dotnet_root = L"C:\\Program Files\\dotnet";
+
     hostfxr_handle cxt = nullptr;
-    int rc = init_fptr(runtimeConfig, nullptr, &cxt);
+    int rc = init_fptr(runtimeConfig, &params, &cxt);
     delete[] runtimeConfig;
 
     if (rc != 0 || cxt == nullptr) {
         delete[] coreDll;
-        char* buf = new char[256];
+        char* buf = new char;
         sprintf_s(buf, 256, "[ERROR] hostfxr_initialize failed with code: %d", rc);
         LogMessage(buf);
         delete[] buf;
@@ -139,7 +131,7 @@ bool InitializeDotNet8() {
     delete[] coreDll;
 
     if (rc != 0 || !g_ManagedTick) {
-        char* buf = new char[256];
+        char* buf = new char;
         sprintf_s(buf, 256, "[ERROR] Failed to bind C# OnTick. Code: %d", rc);
         LogMessage(buf);
         delete[] buf;

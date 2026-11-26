@@ -3,6 +3,8 @@
 #include "coreclr_delegates.h"
 #include "hostfxr.h"
 
+#pragma comment(lib, "user32.lib")
+
 typedef void (CORECLR_DELEGATE_CALLTYPE* tick_fn)();
 tick_fn g_ManagedTick = nullptr;
 HMODULE g_HostFxrLib = nullptr;
@@ -46,7 +48,7 @@ bool InitializeDotNet8() {
     LogMessage("[INFO] Found hostfxr.dll, attempting to load...");
     g_HostFxrLib = LoadLibraryW(hostfxrPath);
     if (!g_HostFxrLib) {
-        char buf[128];
+        char buf[256];
         wsprintfA(buf, "[ERROR] LoadLibraryW failed for hostfxr.dll. Error code: %lu", GetLastError());
         LogMessage(buf);
         return false;
@@ -77,7 +79,7 @@ bool InitializeDotNet8() {
     hostfxr_handle cxt = nullptr;
     int rc = init_fptr(runtimeConfig, nullptr, &cxt);
     if (rc != 0 || cxt == nullptr) {
-        char buf[128];
+        char buf[256];
         wsprintfA(buf, "[ERROR] hostfxr_initialize_for_runtime_config failed with code: %d", rc);
         LogMessage(buf);
         if (cxt) close_fptr(cxt);
@@ -103,7 +105,7 @@ bool InitializeDotNet8() {
     );
 
     if (rc != 0 || !g_ManagedTick) {
-        char buf[128];
+        char buf[256];
         wsprintfA(buf, "[ERROR] Failed to bind C# OnTick method. Code: %d", rc);
         LogMessage(buf);
         return false;

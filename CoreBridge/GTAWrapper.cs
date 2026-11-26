@@ -109,7 +109,6 @@ namespace GTA.Native
         }
     }
 }
-
 namespace GTA.UI
 {
     public static class Notification
@@ -212,3 +211,35 @@ namespace GTA
 
     public class Player
     {
+        public Ped Character => new Ped(Function.Call<int>(Hash.PLAYER_PED_ID));
+    }
+
+    public static class Game
+    {
+        public static Player Player { get; } = new Player();
+        public static int GameTime => Function.Call<int>(Hash.GET_GAME_TIMER);
+        public static bool IsControlJustPressed(Control control) => Function.Call<bool>(Hash.IS_CONTROL_JUST_PRESSED, 0, (int)control);
+        public static bool IsControlPressed(Control control) => Function.Call<bool>(Hash.IS_CONTROL_PRESSED, 0, (int)control);
+
+        [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vKey);
+        public static bool IsKeyPressed(Keys key) => (GetAsyncKeyState((int)key) & 0x8000) != 0;
+    }
+
+    public static class World
+    {
+        public static Vehicle[] GetAllVehicles()
+        {
+            int[] handles = MiniDotNet.Core.ScriptEngine.GetAllVehicleHandles();
+            Vehicle[] list = new Vehicle[handles.Length];
+            for (int i = 0; i < handles.Length; i++) list[i] = new Vehicle(handles[i]);
+            return list;
+        }
+    }
+
+    public abstract class Script
+    {
+        public string BaseDirectory => System.IO.Path.Combine(System.IO.Directory.GetCurrentDirectory(), "scripts");
+        public event EventHandler? Tick;
+        public void OnTickInternal() => Tick?.Invoke(this, EventArgs.Empty);
+    }
+}

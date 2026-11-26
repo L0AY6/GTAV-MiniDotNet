@@ -1,51 +1,54 @@
 #include <windows.h>
-#include <string>
-#include <filesystem>
-#include <fstream>
 #include "main.h"
 #include "coreclr_delegates.h"
 #include "hostfxr.h"
-
-namespace fs = std::filesystem;
 
 typedef void (CORECLR_DELEGATE_CALLTYPE* tick_fn)();
 tick_fn g_ManagedTick = nullptr;
 HMODULE g_HostFxrLib = nullptr;
 
-void LogMessage(const std::string& msg) {
-    std::ofstream log("MiniDotNet.log", std::ios::app);
-    if (log.is_open()) {
-        log << msg << std::endl;
+void LogMessage(const char* msg) {
+    HANDLE hFile = CreateFileA("MiniDotNet.log", FILE_APPEND_DATA, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile != INVALID_HANDLE_VALUE) {
+        DWORD written = 0;
+        WriteFile(hFile, msg, (DWORD)lstrlenA(msg), &written, NULL);
+        WriteFile(hFile, "\r\n", 2, &written, NULL);
+        CloseHandle(hFile);
     }
 }
 
-fs::path FindHostFxrPath() {
-    fs::path baseDir = L"C:\\Program Files\\dotnet\\host\\fxr";
-    if (!fs::exists(baseDir)) return L"";
+bool FindHostFxrPath(wchar_t* outPath, size_t maxLen) {
+    WIN32_FIND_DATAW findData;
+    HANDLE hFind = FindFirstFileW(L"C:\\Program Files\\dotnet\\host\\fxr\\*", &findData);
+    if (hFind == INVALID_HANDLE_VALUE) return false;
 
-    fs::path latestFxr = L"";
-    for (const auto& entry : fs::directory_iterator(baseDir)) {
-        if (entry.is_directory()) {
-            fs::path candidate = entry.path() / "hostfxr.dll";
-            if (fs::exists(candidate)) {
-                latestFxr = candidate;
+    bool found = false;
+    do {
+        if ((findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && findData.cFileName[0] != L'.') {
+            wsprintfW(outPath, L"C:\\Program Files\\dotnet\\host\\fxr\\%s\\hostfxr.dll", findData.cFileName);
+            if (GetFileAttributesW(outPath) != INVALID_FILE_ATTRIBUTES) {
+                found = true;
             }
         }
-    }
-    return latestFxr;
+    } while (FindNextFileW(hFind, &findData));
+
+    FindClose(hFind);
+    return found;
 }
 
 bool InitializeDotNet8() {
-    fs::path hostfxrPath = FindHostFxrPath();
-    if (hostfxrPath.empty()) {
+    wchar_t hostfxrPath[MAX_PATH] = { 0 };
+    if (!FindHostFxrPath(hostfxrPath, MAX_PATH)) {
         LogMessage("[ERROR] hostfxr.dll not found in C:\\Program Files\\dotnet\\host\\fxr");
         return false;
     }
 
-    LogMessage("[INFO] Found hostfxr at: " + hostfxrPath.string());
-    g_HostFxrLib = LoadLibraryW(hostfxrPath.c_str());
+    LogMessage("[INFO] Found hostfxr.dll, attempting to load...");
+    g_HostFxrLib = LoadLibraryW(hostfxrPath);
     if (!g_HostFxrLib) {
-        LogMessage("[ERROR] LoadLibraryW failed for hostfxr.dll. Error code: " + std::to_string(GetLastError()));
+        char buf[128];
+        wsprintfA(buf, "[ERROR] LoadLibraryW failed for hostfxr.dll. Error code: %lu", GetLastError());
+        LogMessage(buf);
         return false;
     }
 
@@ -58,18 +61,25 @@ bool InitializeDotNet8() {
         return false;
     }
 
-    fs::path runtimeConfig = fs::current_path() / "scripts" / "MiniDotNet.Core.runtimeconfig.json";
-    fs::path coreDll = fs::current_path() / "scripts" / "MiniDotNet.Core.dll";
+    wchar_t currentDir[MAX_PATH] = { 0 };
+    GetCurrentDirectoryW(MAX_PATH, currentDir);
 
-    if (!fs::exists(runtimeConfig) || !fs::exists(coreDll)) {
+    wchar_t runtimeConfig[MAX_PATH] = { 0 };
+    wchar_t coreDll[MAX_PATH] = { 0 };
+    wsprintfW(runtimeConfig, L"%s\\scripts\\MiniDotNet.Core.runtimeconfig.json", currentDir);
+    wsprintfW(coreDll, L"%s\\scripts\\MiniDotNet.Core.dll", currentDir);
+
+    if (GetFileAttributesW(runtimeConfig) == INVALID_FILE_ATTRIBUTES || GetFileAttributesW(coreDll) == INVALID_FILE_ATTRIBUTES) {
         LogMessage("[ERROR] Missing MiniDotNet.Core.dll or runtimeconfig.json in scripts folder.");
         return false;
     }
 
     hostfxr_handle cxt = nullptr;
-    int rc = init_fptr(runtimeConfig.c_str(), nullptr, &cxt);
+    int rc = init_fptr(runtimeConfig, nullptr, &cxt);
     if (rc != 0 || cxt == nullptr) {
-        LogMessage("[ERROR] hostfxr_initialize_for_runtime_config failed with code: " + std::to_string(rc));
+        char buf[128];
+        wsprintfA(buf, "[ERROR] hostfxr_initialize_for_runtime_config failed with code: %d", rc);
+        LogMessage(buf);
         if (cxt) close_fptr(cxt);
         return false;
     }
@@ -84,7 +94,7 @@ bool InitializeDotNet8() {
     }
 
     rc = load_assembly(
-        coreDll.c_str(),
+        coreDll,
         L"MiniDotNet.Core.ScriptEngine, MiniDotNet.Core",
         L"OnTick",
         UNMANAGEDCALLERSONLY_METHOD,
@@ -93,7 +103,9 @@ bool InitializeDotNet8() {
     );
 
     if (rc != 0 || !g_ManagedTick) {
-        LogMessage("[ERROR] Failed to bind C# OnTick method. Code: " + std::to_string(rc));
+        char buf[128];
+        wsprintfA(buf, "[ERROR] Failed to bind C# OnTick method. Code: %d", rc);
+        LogMessage(buf);
         return false;
     }
 

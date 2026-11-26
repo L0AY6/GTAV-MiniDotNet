@@ -1,15 +1,24 @@
 #include <windows.h>
 #include <stdio.h>
+#include <stdint.h>
 #include "coreclr_delegates.h"
 #include "hostfxr.h"
 
 typedef void (*scriptRegister_t)(HMODULE, void(*)());
 typedef void (*scriptUnregister_t)(HMODULE);
 typedef void (*scriptWait_t)(DWORD);
+typedef void (*nativeInit_t)(uint64_t hash);
+typedef void (*nativePush64_t)(uint64_t val);
+typedef uint64_t* (*nativeCall_t)();
 
 scriptWait_t pScriptWait = nullptr;
+nativeInit_t pNativeInit = nullptr;
+nativePush64_t pNativePush64 = nullptr;
+nativeCall_t pNativeCall = nullptr;
 
+typedef void (CORECLR_DELEGATE_CALLTYPE* init_native_fn)(void* init, void* push, void* call);
 typedef void (CORECLR_DELEGATE_CALLTYPE* tick_fn)();
+
 volatile tick_fn g_ManagedTick = nullptr;
 HMODULE g_HostFxrLib = nullptr;
 
@@ -49,35 +58,22 @@ bool SearchFxrInBase(const wchar_t* baseDir, wchar_t* outPath) {
 DWORD WINAPI DotNetInitThread(LPVOID lpParam) {
     SetEnvironmentVariableW(L"DOTNET_GCHeapHardLimit", L"0x8000000");
     SetEnvironmentVariableW(L"DOTNET_EnableWriteXorExecute", L"0");
+    SetEnvironmentVariableW(L"DOTNET_TieredCompilation", L"0");
 
     wchar_t* hostfxrPath = new wchar_t[MAX_PATH];
     if (!SearchFxrInBase(L"C:\\Program Files\\dotnet\\host\\fxr", hostfxrPath)) {
         delete[] hostfxrPath;
-        LogMessage("[ERROR] hostfxr.dll not found in C:\\Program Files\\dotnet\\host\\fxr");
+        LogMessage("[ERROR] hostfxr.dll not found.");
         return 0;
     }
 
-    LogMessage("[BG Thread] Loading hostfxr.dll...");
     g_HostFxrLib = LoadLibraryW(hostfxrPath);
     delete[] hostfxrPath;
+    if (!g_HostFxrLib) return 0;
 
-    if (!g_HostFxrLib) {
-        char* buf = new char;
-        sprintf_s(buf, 256, "[ERROR] LoadLibraryW failed. Error: %lu", GetLastError());
-        LogMessage(buf);
-        delete[] buf;
-        return 0;
-    }
-
-    LogMessage("[BG Thread] hostfxr.dll loaded! Resolving functions...");
     auto init_fptr = (hostfxr_initialize_for_runtime_config_fn)GetProcAddress(g_HostFxrLib, "hostfxr_initialize_for_runtime_config");
     auto get_delegate_fptr = (hostfxr_get_runtime_delegate_fn)GetProcAddress(g_HostFxrLib, "hostfxr_get_runtime_delegate");
     auto close_fptr = (hostfxr_close_fn)GetProcAddress(g_HostFxrLib, "hostfxr_close");
-
-    if (!init_fptr || !get_delegate_fptr || !close_fptr) {
-        LogMessage("[ERROR] Failed to resolve hostfxr exports.");
-        return 0;
-    }
 
     wchar_t* currentDir = new wchar_t[MAX_PATH];
     GetCurrentDirectoryW(MAX_PATH, currentDir);
@@ -88,19 +84,11 @@ DWORD WINAPI DotNetInitThread(LPVOID lpParam) {
     swprintf_s(coreDll, MAX_PATH, L"%s\\scripts\\MiniDotNet.Core.dll", currentDir);
     delete[] currentDir;
 
-    if (GetFileAttributesW(runtimeConfig) == INVALID_FILE_ATTRIBUTES || GetFileAttributesW(coreDll) == INVALID_FILE_ATTRIBUTES) {
-        delete[] runtimeConfig;
-        delete[] coreDll;
-        LogMessage("[ERROR] Missing MiniDotNet.Core.dll or runtimeconfig.json.");
-        return 0;
-    }
-
     hostfxr_initialize_parameters params = {};
     params.size = sizeof(hostfxr_initialize_parameters);
     params.host_path = L"C:\\Program Files\\dotnet\\dotnet.exe";
     params.dotnet_root = L"C:\\Program Files\\dotnet";
 
-    LogMessage("[BG Thread] Initializing .NET 8 CoreCLR...");
     hostfxr_handle cxt = nullptr;
     int rc = init_fptr(runtimeConfig, &params, &cxt);
     delete[] runtimeConfig;
@@ -108,24 +96,23 @@ DWORD WINAPI DotNetInitThread(LPVOID lpParam) {
     if (rc != 0 || cxt == nullptr) {
         delete[] coreDll;
         char* buf = new char;
-        sprintf_s(buf, 256, "[ERROR] hostfxr_initialize failed with code: %d", rc);
+        sprintf_s(buf, 256, "[ERROR] hostfxr_initialize failed: 0x%X", rc);
         LogMessage(buf);
         delete[] buf;
-        if (cxt) close_fptr(cxt);
         return 0;
     }
 
-    LogMessage("[BG Thread] CoreCLR initialized! Binding C# ScriptEngine...");
     load_assembly_and_get_function_pointer_fn load_assembly = nullptr;
     rc = get_delegate_fptr(cxt, hdt_load_assembly_and_get_function_pointer, (void**)&load_assembly);
     close_fptr(cxt);
 
     if (rc != 0 || !load_assembly) {
         delete[] coreDll;
-        LogMessage("[ERROR] Failed to get load_assembly delegate.");
+        LogMessage("[ERROR] get_delegate_fptr failed.");
         return 0;
     }
 
+    LogMessage("[BG Thread] Calling load_assembly for OnTick...");
     tick_fn tempTick = nullptr;
     rc = load_assembly(
         coreDll,
@@ -135,23 +122,36 @@ DWORD WINAPI DotNetInitThread(LPVOID lpParam) {
         nullptr,
         (void**)&tempTick
     );
-    delete[] coreDll;
 
-    if (rc != 0 || !tempTick) {
-        char* buf = new char;
-        sprintf_s(buf, 256, "[ERROR] Failed to bind C# OnTick. Code: %d", rc);
-        LogMessage(buf);
-        delete[] buf;
-        return 0;
+    char* rcBuf = new char;
+    sprintf_s(rcBuf, 256, "[BG Thread] load_assembly returned: 0x%X, ptr: %p", rc, tempTick);
+    LogMessage(rcBuf);
+    delete[] rcBuf;
+
+    if (rc == 0 && tempTick != nullptr) {
+        init_native_fn initNatives = nullptr;
+        int rc2 = load_assembly(
+            coreDll,
+            L"MiniDotNet.Core.ScriptEngine, MiniDotNet.Core",
+            L"SetupNatives",
+            UNMANAGEDCALLERSONLY_METHOD,
+            nullptr,
+            (void**)&initNatives
+        );
+        if (rc2 == 0 && initNatives != nullptr) {
+            initNatives((void*)pNativeInit, (void*)pNativePush64, (void*)pNativeCall);
+            LogMessage("[SUCCESS] Native functions passed to C#!");
+        }
+        g_ManagedTick = tempTick;
+        LogMessage("[SUCCESS] C# OnTick bound and active!");
     }
 
-    g_ManagedTick = tempTick;
-    LogMessage("[SUCCESS] .NET 8 Runtime initialized and C# ScriptEngine bound successfully!");
+    delete[] coreDll;
     return 0;
 }
 
 void ScriptMain() {
-    LogMessage("--- ScriptMain Started (Non-Blocking) ---");
+    LogMessage("--- ScriptMain Started ---");
     CreateThread(NULL, 0, DotNetInitThread, NULL, 0, NULL);
 
     while (true) {
@@ -169,22 +169,18 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         LogMessage("--- MiniDotNet DLL Loaded! ---");
 
         HMODULE hSHV = GetModuleHandleA("ScriptHookV.dll");
-        if (!hSHV) {
-            hSHV = LoadLibraryA("ScriptHookV.dll");
-        }
+        if (!hSHV) hSHV = LoadLibraryA("ScriptHookV.dll");
 
         if (hSHV) {
             auto pRegister = (scriptRegister_t)GetProcAddress(hSHV, "?scriptRegister@@YAXPEAUHINSTANCE__@@P6AXXZ@Z");
             pScriptWait = (scriptWait_t)GetProcAddress(hSHV, "?scriptWait@@YAXK@Z");
+            pNativeInit = (nativeInit_t)GetProcAddress(hSHV, "?nativeInit@@YAX_K@Z");
+            pNativePush64 = (nativePush64_t)GetProcAddress(hSHV, "?nativePush64@@YAX_K@Z");
+            pNativeCall = (nativeCall_t)GetProcAddress(hSHV, "?nativeCall@@YAPEA_KXZ");
 
             if (pRegister) {
-                LogMessage("[INFO] Registering ScriptMain directly from DllMain...");
                 pRegister(hModule, ScriptMain);
-            } else {
-                LogMessage("[ERROR] Could not resolve scriptRegister.");
             }
-        } else {
-            LogMessage("[ERROR] Could not load ScriptHookV.dll");
         }
     }
     return TRUE;

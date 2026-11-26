@@ -20,7 +20,9 @@ worldGetAllVeh_t pWorldGetAllVeh = nullptr;
 typedef void (__cdecl* init_native_fn)(void* init, void* push, void* call, void* getAddr, void* getAllVeh);
 typedef void (__cdecl* tick_fn)();
 
-tick_fn g_ManagedTick = nullptr;
+tick_fn g_CoreTick = nullptr;
+tick_fn g_ModTicks;
+int g_ModCount = 0;
 
 void LogMessage(const char* msg) {
     HANDLE hFile = CreateFileA("MiniDotNet.log", FILE_APPEND_DATA, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -32,33 +34,64 @@ void LogMessage(const char* msg) {
     }
 }
 
-bool LoadAotCore() {
+void LoadPluginDll(const wchar_t* dllPath, bool isCore) {
+    HMODULE hMod = LoadLibraryW(dllPath);
+    if (!hMod) return;
+
+    auto initNatives = (init_native_fn)GetProcAddress(hMod, "SetupNatives");
+    auto tickFn = (tick_fn)GetProcAddress(hMod, "OnTick");
+    if (!tickFn) return;
+
+    if (initNatives) {
+        initNatives((void*)pNativeInit, (void*)pNativePush64, (void*)pNativeCall, (void*)pGetEntityAddr, (void*)pWorldGetAllVeh);
+    }
+
+    if (isCore) {
+        g_CoreTick = tickFn;
+        LogMessage("[SUCCESS] MiniDotNet Core Engine Active!");
+    } else if (g_ModCount < 32) {
+        g_ModTicks[g_ModCount++] = tickFn;
+        LogMessage("[SUCCESS] Loaded External AOT Mod Plugin!");
+    }
+}
+
+void LoadAllPlugins() {
     wchar_t* currentDir = new wchar_t[MAX_PATH];
     GetCurrentDirectoryW(MAX_PATH, currentDir);
 
     wchar_t* coreDll = new wchar_t[MAX_PATH];
     swprintf_s(coreDll, MAX_PATH, L"%s\\scripts\\MiniDotNet.Core.dll", currentDir);
-    delete[] currentDir;
-
-    HMODULE hCore = LoadLibraryW(coreDll);
+    LoadPluginDll(coreDll, true);
     delete[] coreDll;
-    if (!hCore) return false;
 
-    auto initNatives = (init_native_fn)GetProcAddress(hCore, "SetupNatives");
-    g_ManagedTick = (tick_fn)GetProcAddress(hCore, "OnTick");
-    if (!g_ManagedTick) return false;
+    wchar_t* searchPattern = new wchar_t[MAX_PATH];
+    swprintf_s(searchPattern, MAX_PATH, L"%s\\scripts\\*.mod.dll", currentDir);
 
-    if (initNatives) {
-        initNatives((void*)pNativeInit, (void*)pNativePush64, (void*)pNativeCall, (void*)pGetEntityAddr, (void*)pWorldGetAllVeh);
+    WIN32_FIND_DATAW findData;
+    HANDLE hFind = FindFirstFileW(searchPattern, &findData);
+    delete[] searchPattern;
+
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            if (!(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                wchar_t* modPath = new wchar_t[MAX_PATH];
+                swprintf_s(modPath, MAX_PATH, L"%s\\scripts\\%s", currentDir, findData.cFileName);
+                LoadPluginDll(modPath, false);
+                delete[] modPath;
+            }
+        } while (FindNextFileW(hFind, &findData));
+        FindClose(hFind);
     }
-    LogMessage("[SUCCESS] MiniDotNet Standalone Engine Active!");
-    return true;
+    delete[] currentDir;
 }
 
 void ScriptMain() {
-    if (!LoadAotCore()) return;
+    LoadAllPlugins();
     while (true) {
-        if (g_ManagedTick) g_ManagedTick();
+        if (g_CoreTick) g_CoreTick();
+        for (int i = 0; i < g_ModCount; i++) {
+            if (g_ModTicks[i]) g_ModTicks[i]();
+        }
         if (pScriptWait) pScriptWait(0);
         else Sleep(16);
     }

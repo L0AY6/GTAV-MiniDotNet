@@ -1,8 +1,11 @@
 #include <windows.h>
+#include <objbase.h>
 #include <stdio.h>
 #include <stdint.h>
 #include "coreclr_delegates.h"
 #include "hostfxr.h"
+
+#pragma comment(lib, "ole32.lib")
 
 typedef void (*scriptRegister_t)(HMODULE, void(*)());
 typedef void (*scriptUnregister_t)(HMODULE);
@@ -56,9 +59,13 @@ bool SearchFxrInBase(const wchar_t* baseDir, wchar_t* outPath) {
 }
 
 DWORD WINAPI DotNetInitThread(LPVOID lpParam) {
+    CoInitializeEx(NULL, COINIT_MULTITHREADED);
+
     SetEnvironmentVariableW(L"DOTNET_GCHeapHardLimit", L"0x8000000");
     SetEnvironmentVariableW(L"DOTNET_EnableWriteXorExecute", L"0");
     SetEnvironmentVariableW(L"DOTNET_TieredCompilation", L"0");
+    SetEnvironmentVariableW(L"DOTNET_gcServer", L"0");
+    SetEnvironmentVariableW(L"DOTNET_ReadyToRun", L"1");
 
     wchar_t* hostfxrPath = new wchar_t[MAX_PATH];
     if (!SearchFxrInBase(L"C:\\Program Files\\dotnet\\host\\fxr", hostfxrPath)) {
@@ -95,7 +102,7 @@ DWORD WINAPI DotNetInitThread(LPVOID lpParam) {
 
     if (rc != 0 || cxt == nullptr) {
         delete[] coreDll;
-        char* buf = new char;
+        char* buf = new char[256];
         sprintf_s(buf, 256, "[ERROR] hostfxr_initialize failed: 0x%X", rc);
         LogMessage(buf);
         delete[] buf;
@@ -112,7 +119,7 @@ DWORD WINAPI DotNetInitThread(LPVOID lpParam) {
         return 0;
     }
 
-    LogMessage("[BG Thread] Calling load_assembly for OnTick...");
+    LogMessage("[BG Thread] Entering load_assembly for OnTick...");
     tick_fn tempTick = nullptr;
     rc = load_assembly(
         coreDll,
@@ -123,7 +130,7 @@ DWORD WINAPI DotNetInitThread(LPVOID lpParam) {
         (void**)&tempTick
     );
 
-    char* rcBuf = new char;
+    char* rcBuf = new char[256];
     sprintf_s(rcBuf, 256, "[BG Thread] load_assembly returned: 0x%X, ptr: %p", rc, tempTick);
     LogMessage(rcBuf);
     delete[] rcBuf;

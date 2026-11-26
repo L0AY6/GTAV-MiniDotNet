@@ -23,15 +23,18 @@ void LogMessage(const char* msg) {
     }
 }
 
-bool FindHostFxrPath(wchar_t* outPath) {
+bool SearchFxrInBase(const wchar_t* baseDir, wchar_t* outPath) {
+    wchar_t searchPattern[MAX_PATH] = { 0 };
+    swprintf_s(searchPattern, MAX_PATH, L"%s\\*", baseDir);
+
     WIN32_FIND_DATAW findData;
-    HANDLE hFind = FindFirstFileW(L"C:\\Program Files\\dotnet\\host\\fxr\\*", &findData);
+    HANDLE hFind = FindFirstFileW(searchPattern, &findData);
     if (hFind == INVALID_HANDLE_VALUE) return false;
 
     bool found = false;
     do {
-        if ((findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && findData.cFileName[0] != L'.') {
-            swprintf_s(outPath, MAX_PATH, L"C:\\Program Files\\dotnet\\host\\fxr\\%s\\hostfxr.dll", findData.cFileName);
+        if ((findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && findData.cFileName != L'.') {
+            swprintf_s(outPath, MAX_PATH, L"%s\\%s\\hostfxr.dll", baseDir, findData.cFileName);
             if (GetFileAttributesW(outPath) != INVALID_FILE_ATTRIBUTES) {
                 found = true;
             }
@@ -42,17 +45,29 @@ bool FindHostFxrPath(wchar_t* outPath) {
     return found;
 }
 
+bool FindHostFxrPath(wchar_t* outPath) {
+    if (SearchFxrInBase(L"C:\\Program Files\\dotnet\\host\\fxr", outPath)) return true;
+    if (SearchFxrInBase(L"C:\\Program Files (x86)\\dotnet\\host\\fxr", outPath)) return true;
+    
+    wchar_t currentDir[MAX_PATH] = { 0 };
+    GetCurrentDirectoryW(MAX_PATH, currentDir);
+    swprintf_s(outPath, MAX_PATH, L"%s\\hostfxr.dll", currentDir);
+    if (GetFileAttributesW(outPath) != INVALID_FILE_ATTRIBUTES) return true;
+
+    return false;
+}
+
 bool InitializeDotNet8() {
     wchar_t hostfxrPath[MAX_PATH] = { 0 };
     if (!FindHostFxrPath(hostfxrPath)) {
-        LogMessage("[ERROR] hostfxr.dll not found in C:\\Program Files\\dotnet\\host\\fxr");
+        LogMessage("[ERROR] hostfxr.dll not found in Program Files or Game Folder!");
         return false;
     }
 
     LogMessage("[INFO] Found hostfxr.dll, loading...");
     g_HostFxrLib = LoadLibraryW(hostfxrPath);
     if (!g_HostFxrLib) {
-        char buf[256];
+        char buf;
         sprintf_s(buf, "[ERROR] LoadLibraryW failed for hostfxr.dll. Error: %lu", GetLastError());
         LogMessage(buf);
         return false;
@@ -83,7 +98,7 @@ bool InitializeDotNet8() {
     hostfxr_handle cxt = nullptr;
     int rc = init_fptr(runtimeConfig, nullptr, &cxt);
     if (rc != 0 || cxt == nullptr) {
-        char buf[256];
+        char buf;
         sprintf_s(buf, "[ERROR] hostfxr_initialize failed with code: %d", rc);
         LogMessage(buf);
         if (cxt) close_fptr(cxt);
@@ -109,7 +124,7 @@ bool InitializeDotNet8() {
     );
 
     if (rc != 0 || !g_ManagedTick) {
-        char buf[256];
+        char buf;
         sprintf_s(buf, "[ERROR] Failed to bind C# OnTick. Code: %d", rc);
         LogMessage(buf);
         return false;

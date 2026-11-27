@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text;
 using System.Runtime.InteropServices;
 
 namespace MiniDotNet.Core
@@ -28,7 +29,48 @@ namespace MiniDotNet.Core
             {
                 _initialized = true;
                 Log("=== MiniDotNet Standalone Core Active! ===");
+
+                MiniMenu.Mods.Add(new ModItem
+                {
+                    Name = "Test Mod (Ready)",
+                    IsEnabled = true,
+                    TickAction = () => { }
+                });
             }
+
+            MiniMenu.Tick();
+        }
+
+        public static void NativeInit(ulong hash)
+        {
+            if (_nativeInit != null) _nativeInit(hash);
+        }
+
+        public static void PushInt(int val)
+        {
+            if (_nativePush64 != null) _nativePush64((ulong)(long)val);
+        }
+
+        public static void PushFloat(float val)
+        {
+            if (_nativePush64 != null)
+            {
+                uint bits = *(uint*)&val;
+                _nativePush64((ulong)bits);
+            }
+        }
+
+        public static void PushString(string str, out IntPtr ptr)
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(str + "\0");
+            ptr = Marshal.AllocHGlobal(bytes.Length);
+            Marshal.Copy(bytes, 0, ptr, bytes.Length);
+            if (_nativePush64 != null) _nativePush64((ulong)ptr);
+        }
+
+        public static void NativeCall()
+        {
+            if (_nativeCall != null) _nativeCall();
         }
 
         public static void Log(string message)

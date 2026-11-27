@@ -54,7 +54,7 @@ namespace GTA.Native
         private static int _idx = 0;
         private static IntPtr[] InitRing()
         {
-            var a = new IntPtr;
+            var a = (IntPtr[])Array.CreateInstance(typeof(IntPtr), 64);
             for (int i = 0; i < 64; i++) a[i] = Marshal.AllocHGlobal(256);
             return a;
         }
@@ -202,10 +202,10 @@ namespace GTA
     {
         public static Vehicle[] GetAllVehicles()
         {
-            int[] buf = new int[256];
+            int[] buf = (int[])Array.CreateInstance(typeof(int), 256);
             int count = MonoBridgeHost.BridgeGetAllVeh(buf, 256);
-            if (count <= 0) return new Vehicle[0];
-            Vehicle[] l = new Vehicle[count];
+            if (count <= 0) return (Vehicle[])Array.CreateInstance(typeof(Vehicle), 0);
+            Vehicle[] l = (Vehicle[])Array.CreateInstance(typeof(Vehicle), count);
             for (int i = 0; i < count; i++) l[i] = new Vehicle(buf[i]);
             return l;
         }

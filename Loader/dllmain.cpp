@@ -31,10 +31,18 @@ typedef void* (*mono_assembly_get_image_t)(void* assembly);
 typedef void* (*mono_class_from_name_t)(void* image, const char* name_space, const char* name);
 typedef void* (*mono_class_get_method_from_name_t)(void* klass, const char* name, int param_count);
 typedef void* (*mono_runtime_invoke_t)(void* method, void* obj, void** params, void** exc);
+typedef void* (*mono_object_to_string_t)(void* obj, void** exc);
+typedef char* (*mono_string_to_utf8_t)(void* str);
+typedef void (*mono_free_t)(void* ptr);
 
 mono_runtime_invoke_t pMonoInvoke = nullptr;
+mono_object_to_string_t pMonoObjToStr = nullptr;
+mono_string_to_utf8_t pMonoStrToUtf8 = nullptr;
+mono_free_t pMonoFree = nullptr;
+
 void* g_MonoTickMethod = nullptr;
 bool g_MonoReady = false;
+bool g_MonoExcLogged = false;
 int g_MonoWait = 0;
 
 void LogMessage(const char* msg) {
@@ -68,15 +76,17 @@ extern "C" __declspec(dllexport) int __cdecl BridgeGetAllVeh(int* arr, int arrSi
 void InitMonoBridge(const char* baseDir) {
     char* monoDllPath = (char*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, MAX_PATH);
     char* libDir = (char*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, MAX_PATH);
+    char* etcDir = (char*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, MAX_PATH);
     char* shimPath = (char*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, MAX_PATH);
 
     wsprintfA(monoDllPath, "%s\\scripts\\mono\\mono-2.0-sgen.dll", baseDir);
     wsprintfA(libDir, "%s\\scripts\\mono\\lib", baseDir);
+    wsprintfA(etcDir, "%s\\scripts\\mono\\etc", baseDir);
     wsprintfA(shimPath, "%s\\scripts\\ScriptHookVDotNet3.dll", baseDir);
 
     HMODULE hMono = LoadLibraryA(monoDllPath);
     if (!hMono) {
-        LogMessage("[Mono] mono-2.0-sgen.dll not found, skipping Mono bridge.");
+        LogMessage("[Mono] mono-2.0-sgen.dll not found.");
         return;
     }
 
@@ -87,12 +97,18 @@ void InitMonoBridge(const char* baseDir) {
     auto pClassFromName = (mono_class_from_name_t)GetProcAddress(hMono, "mono_class_from_name");
     auto pGetMethod = (mono_class_get_method_from_name_t)GetProcAddress(hMono, "mono_class_get_method_from_name");
     pMonoInvoke = (mono_runtime_invoke_t)GetProcAddress(hMono, "mono_runtime_invoke");
+    pMonoObjToStr = (mono_object_to_string_t)GetProcAddress(hMono, "mono_object_to_string");
+    pMonoStrToUtf8 = (mono_string_to_utf8_t)GetProcAddress(hMono, "mono_string_to_utf8");
+    pMonoFree = (mono_free_t)GetProcAddress(hMono, "mono_free");
 
     if (!pJitInit || !pAsmOpen || !pGetImage || !pClassFromName || !pGetMethod || !pMonoInvoke) return;
 
-    if (pSetDirs) pSetDirs(libDir, libDir);
+    if (pSetDirs) pSetDirs(libDir, etcDir);
     void* domain = pJitInit("MiniDotNetDomain", "v4.0.30319");
-    if (!domain) return;
+    if (!domain) {
+        LogMessage("[Mono] Failed to init Mono domain.");
+        return;
+    }
 
     void* asmShim = pAsmOpen(domain, shimPath);
     if (!asmShim) {
@@ -178,6 +194,21 @@ void ScriptMain() {
         } else if (g_MonoTickMethod && pMonoInvoke) {
             void* exc = nullptr;
             pMonoInvoke(g_MonoTickMethod, nullptr, nullptr, &exc);
+            if (exc && !g_MonoExcLogged) {
+                g_MonoExcLogged = true;
+                LogMessage("[Mono Exception] Error inside TickAll!");
+                if (pMonoObjToStr && pMonoStrToUtf8) {
+                    void* strExc = nullptr;
+                    void* monoStr = pMonoObjToStr(exc, &strExc);
+                    if (monoStr) {
+                        char* utf8 = pMonoStrToUtf8(monoStr);
+                        if (utf8) {
+                            LogMessage(utf8);
+                            if (pMonoFree) pMonoFree(utf8);
+                        }
+                    }
+                }
+            }
         }
 
         if (pScriptWait) pScriptWait(0);

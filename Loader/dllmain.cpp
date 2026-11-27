@@ -24,7 +24,7 @@ tick_fn g_CoreTick = nullptr;
 tick_fn* g_ModTicks = nullptr;
 int g_ModCount = 0;
 
-typedef void* (*mono_jit_init_t)(const char* file);
+typedef void* (*mono_jit_init_version_t)(const char* file, const char* runtime_version);
 typedef void (*mono_set_dirs_t)(const char* assembly_dir, const char* config_dir);
 typedef void* (*mono_domain_assembly_open_t)(void* domain, const char* name);
 typedef void* (*mono_assembly_get_image_t)(void* assembly);
@@ -66,10 +66,13 @@ extern "C" __declspec(dllexport) int __cdecl BridgeGetAllVeh(int* arr, int arrSi
 }
 
 void InitMonoBridge(const char* baseDir) {
-    char monoDllPath, libDir, shimPath;
-    sprintf_s(monoDllPath, MAX_PATH, "%s\\scripts\\mono\\mono-2.0-sgen.dll", baseDir);
-    sprintf_s(libDir, MAX_PATH, "%s\\scripts\\mono\\lib", baseDir);
-    sprintf_s(shimPath, MAX_PATH, "%s\\scripts\\ScriptHookVDotNet3.dll", baseDir);
+    char* monoDllPath = (char*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, MAX_PATH);
+    char* libDir = (char*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, MAX_PATH);
+    char* shimPath = (char*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, MAX_PATH);
+
+    wsprintfA(monoDllPath, "%s\\scripts\\mono\\mono-2.0-sgen.dll", baseDir);
+    wsprintfA(libDir, "%s\\scripts\\mono\\lib", baseDir);
+    wsprintfA(shimPath, "%s\\scripts\\ScriptHookVDotNet3.dll", baseDir);
 
     HMODULE hMono = LoadLibraryA(monoDllPath);
     if (!hMono) {
@@ -78,7 +81,7 @@ void InitMonoBridge(const char* baseDir) {
     }
 
     auto pSetDirs = (mono_set_dirs_t)GetProcAddress(hMono, "mono_set_dirs");
-    auto pJitInit = (mono_jit_init_t)GetProcAddress(hMono, "mono_jit_init_version");
+    auto pJitInit = (mono_jit_init_version_t)GetProcAddress(hMono, "mono_jit_init_version");
     auto pAsmOpen = (mono_domain_assembly_open_t)GetProcAddress(hMono, "mono_domain_assembly_open");
     auto pGetImage = (mono_assembly_get_image_t)GetProcAddress(hMono, "mono_assembly_get_image");
     auto pClassFromName = (mono_class_from_name_t)GetProcAddress(hMono, "mono_class_from_name");
@@ -132,39 +135,35 @@ void LoadPluginDll(const wchar_t* dllPath, bool isCore) {
 void LoadAllPlugins() {
     g_ModTicks = (tick_fn*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, 32 * sizeof(tick_fn));
 
-    wchar_t* currentDir = new wchar_t[MAX_PATH];
+    wchar_t* currentDir = (wchar_t*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, MAX_PATH * sizeof(wchar_t));
     GetCurrentDirectoryW(MAX_PATH, currentDir);
 
-    wchar_t* coreDll = new wchar_t[MAX_PATH];
-    swprintf_s(coreDll, MAX_PATH, L"%s\\scripts\\MiniDotNet.Core.dll", currentDir);
+    wchar_t* coreDll = (wchar_t*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, MAX_PATH * sizeof(wchar_t));
+    wsprintfW(coreDll, L"%s\\scripts\\MiniDotNet.Core.dll", currentDir);
     LoadPluginDll(coreDll, true);
-    delete[] coreDll;
 
-    wchar_t* searchPattern = new wchar_t[MAX_PATH];
-    swprintf_s(searchPattern, MAX_PATH, L"%s\\scripts\\*.mod.dll", currentDir);
+    wchar_t* searchPattern = (wchar_t*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, MAX_PATH * sizeof(wchar_t));
+    wsprintfW(searchPattern, L"%s\\scripts\\*.mod.dll", currentDir);
 
     WIN32_FIND_DATAW findData;
     HANDLE hFind = FindFirstFileW(searchPattern, &findData);
-    delete[] searchPattern;
 
     if (hFind != INVALID_HANDLE_VALUE) {
         do {
             if (!(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-                wchar_t* modPath = new wchar_t[MAX_PATH];
-                swprintf_s(modPath, MAX_PATH, L"%s\\scripts\\%s", currentDir, findData.cFileName);
+                wchar_t* modPath = (wchar_t*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, MAX_PATH * sizeof(wchar_t));
+                wsprintfW(modPath, L"%s\\scripts\\%s", currentDir, findData.cFileName);
                 LoadPluginDll(modPath, false);
-                delete[] modPath;
             }
         } while (FindNextFileW(hFind, &findData));
         FindClose(hFind);
     }
-    delete[] currentDir;
 }
 
 void ScriptMain() {
     LoadAllPlugins();
 
-    char ansiDir;
+    char* ansiDir = (char*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, MAX_PATH);
     GetCurrentDirectoryA(MAX_PATH, ansiDir);
 
     while (true) {

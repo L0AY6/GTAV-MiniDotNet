@@ -32,9 +32,19 @@ jobs:
     - name: Build ScriptHookVDotNet3 Mono Shim
       shell: pwsh
       run: |
-        $shimFile = Get-ChildItem -Filter "ScriptHookVDotNet3.cs" -Recurse | Select-Object -First 1
-        $csc = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
-        & $csc /unsafe /target:library /out:output/scripts/ScriptHookVDotNet3.dll $shimFile.FullName
+        New-Item -ItemType Directory -Force -Path "ShimProj"
+        Copy-Item "MonoShim/ScriptHookVDotNet3.cs" "ShimProj/"
+        @'
+        <Project Sdk="Microsoft.NET.Sdk">
+          <PropertyGroup>
+            <TargetFramework>net48</TargetFramework>
+            <AssemblyName>ScriptHookVDotNet3</AssemblyName>
+            <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+            <LangVersion>latest</LangVersion>
+          </PropertyGroup>
+        </Project>
+        '@ | Set-Content "ShimProj/ScriptHookVDotNet3.csproj"
+        dotnet build ShimProj/ScriptHookVDotNet3.csproj -c Release -o output/scripts
 
     - name: Compile C++ ASI Loader (MiniDotNet.asi)
       shell: cmd

@@ -12,6 +12,7 @@ namespace MiniDotNet.Core
         private static delegate* unmanaged[Cdecl]<ulong, void> _nativeInit;
         private static delegate* unmanaged[Cdecl]<ulong, void> _nativePush64;
         private static delegate* unmanaged[Cdecl]<ulong*> _nativeCall;
+        private static ulong* _lastResult;
 
         [UnmanagedCallersOnly(EntryPoint = "SetupNatives")]
         public static void SetupNatives(IntPtr initPtr, IntPtr pushPtr, IntPtr callPtr, IntPtr getAddrPtr, IntPtr getAllVehPtr)
@@ -32,9 +33,10 @@ namespace MiniDotNet.Core
 
                 MiniMenu.Mods.Add(new ModItem
                 {
-                    Name = "Test Mod (Ready)",
+                    Name = "Test Mod",
                     IsEnabled = true,
-                    TickAction = () => { }
+                    TickAction = () => { },
+                    OpenMenuAction = () => { Log("Test Mod Sub-Menu Triggered!"); }
                 });
             }
 
@@ -67,7 +69,13 @@ namespace MiniDotNet.Core
 
         public static void NativeCall()
         {
-            if (_nativeCall != null) _nativeCall();
+            if (_nativeCall != null) _lastResult = _nativeCall();
+        }
+
+        public static int GetResultInt()
+        {
+            if (_lastResult != null) return *(int*)_lastResult;
+            return 0;
         }
 
         public static void Log(string message)

@@ -25,6 +25,12 @@ namespace MiniDotNet.Core
         private static delegate* unmanaged[Cdecl]<ulong, void> _nativePush64;
         private static delegate* unmanaged[Cdecl]<ulong*> _nativeCall;
 
+        [DllImport("user32.dll")]
+        private static extern short GetAsyncKeyState(int vKey);
+
+        [DllImport("user32.dll")]
+        private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
         private static readonly IntPtr[] _strRing = InitRing();
         private static int _ringIdx = 0;
 
@@ -97,7 +103,6 @@ namespace MiniDotNet.Core
                 _mods.Add(new ModEntry { Name = "No Mods Found in /scripts", IsEnabled = false, HasError = false });
             }
         }
-
         [UnmanagedCallersOnly(EntryPoint = "OnTick")]
         public static void OnTick()
         {
@@ -109,11 +114,12 @@ namespace MiniDotNet.Core
 
             int now = (int)CallNative(0x9CD27B0045628463);
 
-            bool f9 = CallNative(0x580417101DDB492F, 0, 56) != 0;
-            bool rb = CallNative(0xF3A21BCD95725A4A, 0, 206) != 0;
-            bool dpadDown = CallNative(0x580417101DDB492F, 0, 173) != 0;
+            bool f2Key = (GetAsyncKeyState(0x71) & 0x8000) != 0;
+            bool rb = CallNative(0xF3A21BCD95725A4A, 2, 206) != 0;
+            bool crossOrA = CallNative(0xF3A21BCD95725A4A, 2, 201) != 0 || CallNative(0xF3A21BCD95725A4A, 0, 18) != 0;
+            bool dpadDown = CallNative(0x580417101DDB492F, 2, 173) != 0 || CallNative(0x580417101DDB492F, 0, 19) != 0;
 
-            if ((f9 || (rb && dpadDown)) && now - _lastInputTime > 250)
+            if ((f2Key || (rb && crossOrA && dpadDown)) && now - _lastInputTime > 300)
             {
                 _menuOpen = !_menuOpen;
                 _lastInputTime = now;
@@ -144,10 +150,11 @@ namespace MiniDotNet.Core
 
         private static void HandleMenuInput(int now)
         {
-            if (now - _lastInputTime < 150 || _mods.Count == 0) return;
+            if (now - _lastInputTime < 160 || _mods.Count == 0) return;
 
             bool up = CallNative(0x91AEF906BCA88877, 2, 172) != 0;
             bool down = CallNative(0x91AEF906BCA88877, 2, 173) != 0;
+            bool right = CallNative(0x91AEF906BCA88877, 2, 175) != 0;
             bool select = CallNative(0x91AEF906BCA88877, 2, 201) != 0;
             bool back = CallNative(0x91AEF906BCA88877, 2, 202) != 0;
 
@@ -161,12 +168,21 @@ namespace MiniDotNet.Core
                 _selectedIndex = (_selectedIndex + 1) % _mods.Count;
                 _lastInputTime = now;
             }
-            else if (select)
+            else if (right || select)
             {
                 var mod = _mods[_selectedIndex];
                 if (!mod.HasError && !string.IsNullOrEmpty(mod.FilePath))
                 {
-                    mod.IsEnabled = !mod.IsEnabled;
+                    if (mod.Name.Contains("Suspension", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _menuOpen = false;
+                        keybd_event(0x76, 0, 0, UIntPtr.Zero);
+                        keybd_event(0x76, 0, 2, UIntPtr.Zero);
+                    }
+                    else
+                    {
+                        mod.IsEnabled = !mod.IsEnabled;
+                    }
                 }
                 _lastInputTime = now;
             }

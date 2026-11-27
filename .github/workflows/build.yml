@@ -1,4 +1,4 @@
-name: Build GTAV MiniDotNet Loader
+name: Build GTAV MiniDotNet Loader with Mono
 
 on:
   push:
@@ -23,10 +23,24 @@ jobs:
       with:
         arch: x64
 
+    - name: Download Portable Mono Runtime (x64)
+      shell: pwsh
+      run: |
+        Invoke-WebRequest -Uri "https://mono-project.com" -OutFile "mono.msi"
+        Start-Process msiexec.exe -ArgumentList "/a mono.msi /qn TARGETDIR=$PWD\mono_ext" -Wait
+        New-Item -ItemType Directory -Force -Path "output/scripts/mono"
+        Copy-Item "mono_ext\Program Files\Mono\bin\mono-2.0-sgen.dll" "output/scripts/mono/"
+        Copy-Item -Recurse "mono_ext\Program Files\Mono\lib\mono\4.5" "output/scripts/mono/lib"
+
     - name: Build C# AOT Core Bridge (MiniDotNet.Core.dll)
       shell: pwsh
       run: |
         dotnet publish CoreBridge/MiniDotNet.Core.csproj -c Release -r win-x64 -o output/scripts
+
+    - name: Build ScriptHookVDotNet3 Mono Shim
+      shell: pwsh
+      run: |
+        & "$PWD\mono_ext\Program Files\Mono\bin\mcs.bat" -target:library -out:output/scripts/ScriptHookVDotNet3.dll MonoShim/ScriptHookVDotNet3.cs
 
     - name: Compile C++ ASI Loader (MiniDotNet.asi)
       shell: cmd
@@ -37,5 +51,5 @@ jobs:
     - name: Upload Built Mod Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: GTAV-MiniDotNet-Release
+        name: GTAV-MiniDotNet-MonoRelease
         path: output/

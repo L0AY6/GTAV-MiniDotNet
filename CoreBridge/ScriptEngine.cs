@@ -115,11 +115,11 @@ namespace MiniDotNet.Core
             int now = (int)CallNative(0x9CD27B0045628463);
 
             bool f2Key = (GetAsyncKeyState(0x71) & 0x8000) != 0;
-            bool rb = CallNative(0xF3A21BCD95725A4A, 2, 206) != 0;
+            bool rb = CallNative(0xF3A21BCD95725A4A, 2, 206) != 0 || CallNative(0xF3A21BCD95725A4A, 0, 44) != 0;
             bool crossOrA = CallNative(0xF3A21BCD95725A4A, 2, 201) != 0 || CallNative(0xF3A21BCD95725A4A, 0, 18) != 0;
             bool dpadDown = CallNative(0x580417101DDB492F, 2, 173) != 0 || CallNative(0x580417101DDB492F, 0, 19) != 0;
 
-            if ((f2Key || (rb && crossOrA && dpadDown)) && now - _lastInputTime > 300)
+            if ((f2Key || (rb && crossOrA && dpadDown)) && now - _lastInputTime > 350)
             {
                 _menuOpen = !_menuOpen;
                 _lastInputTime = now;
@@ -137,7 +137,7 @@ namespace MiniDotNet.Core
         private static void DisableGameDpadAndPhone()
         {
             int[] controlsToBlock = {
-                27, 19, 85, 74, 20, 47, 51,
+                27, 19, 85, 74, 20, 47, 51, 18, 22, 24, 25, 45,
                 172, 173, 174, 175, 201, 202
             };
 
@@ -148,15 +148,21 @@ namespace MiniDotNet.Core
             }
         }
 
+        private static bool IsBtnPressed(int ctrl0, int ctrl2)
+        {
+            return CallNative(0x91AEF906BCA88877, 0, (ulong)ctrl0) != 0 ||
+                   CallNative(0x91AEF906BCA88877, 2, (ulong)ctrl2) != 0;
+        }
+
         private static void HandleMenuInput(int now)
         {
-            if (now - _lastInputTime < 160 || _mods.Count == 0) return;
+            if (now - _lastInputTime < 180 || _mods.Count == 0) return;
 
-            bool up = CallNative(0x91AEF906BCA88877, 2, 172) != 0;
-            bool down = CallNative(0x91AEF906BCA88877, 2, 173) != 0;
-            bool right = CallNative(0x91AEF906BCA88877, 2, 175) != 0;
-            bool select = CallNative(0x91AEF906BCA88877, 2, 201) != 0;
-            bool back = CallNative(0x91AEF906BCA88877, 2, 202) != 0;
+            bool up = IsBtnPressed(27, 172);
+            bool down = IsBtnPressed(19, 173);
+            bool right = IsBtnPressed(74, 175);
+            bool select = IsBtnPressed(18, 201);
+            bool back = IsBtnPressed(45, 202);
 
             if (up)
             {
@@ -168,21 +174,24 @@ namespace MiniDotNet.Core
                 _selectedIndex = (_selectedIndex + 1) % _mods.Count;
                 _lastInputTime = now;
             }
-            else if (right || select)
+            else if (right)
             {
                 var mod = _mods[_selectedIndex];
                 if (!mod.HasError && !string.IsNullOrEmpty(mod.FilePath))
                 {
-                    if (mod.Name.Contains("Suspension", StringComparison.OrdinalIgnoreCase))
-                    {
-                        _menuOpen = false;
-                        keybd_event(0x76, 0, 0, UIntPtr.Zero);
-                        keybd_event(0x76, 0, 2, UIntPtr.Zero);
-                    }
-                    else
-                    {
-                        mod.IsEnabled = !mod.IsEnabled;
-                    }
+                    _menuOpen = false;
+                    byte vk = mod.Name.Contains("Suspension", StringComparison.OrdinalIgnoreCase) ? (byte)0x76 : (byte)0x74;
+                    keybd_event(vk, 0, 0, UIntPtr.Zero);
+                    keybd_event(vk, 0, 2, UIntPtr.Zero);
+                }
+                _lastInputTime = now;
+            }
+            else if (select)
+            {
+                var mod = _mods[_selectedIndex];
+                if (!mod.HasError && !string.IsNullOrEmpty(mod.FilePath))
+                {
+                    mod.IsEnabled = !mod.IsEnabled;
                 }
                 _lastInputTime = now;
             }

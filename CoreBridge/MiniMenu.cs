@@ -9,6 +9,8 @@ namespace MiniDotNet.Core
     {
         public string Name { get; set; }
         public Action TickAction { get; set; }
+        public Action OpenMenuAction { get; set; }
+        public int TriggerKey { get; set; } = 0;
         public bool IsEnabled { get; set; } = true;
     }
 
@@ -18,20 +20,52 @@ namespace MiniDotNet.Core
         public static bool IsOpen = false;
         private static int _selectedIndex = 0;
         private static bool _keyPressed = false;
+        private static bool _padComboPressed = false;
+        private static bool _padNavPressed = false;
 
         [DllImport("user32.dll")]
         private static extern short GetAsyncKeyState(int vKey);
 
+        [DllImport("user32.dll")]
+        private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
         private const int VK_F2 = 0x71;
         private const int VK_UP = 0x26;
         private const int VK_DOWN = 0x28;
+        private const int VK_RIGHT = 0x27;
         private const int VK_RETURN = 0x0D;
+        private const uint KEYEVENTF_KEYUP = 0x0002;
+
+        private const int INPUT_COVER = 44;
+        private const int INPUT_FRONTEND_DOWN = 187;
+        private const int INPUT_FRONTEND_UP = 188;
+        private const int INPUT_FRONTEND_LEFT = 189;
+        private const int INPUT_FRONTEND_RIGHT = 190;
+        private const int INPUT_FRONTEND_ACCEPT = 201;
 
         private static bool IsKeyDown(int key) => (GetAsyncKeyState(key) & 0x8000) != 0;
 
+        private static bool IsControlPressed(int control)
+        {
+            ScriptEngine.NativeInit(0xE2587F8CBBD87B1D);
+            ScriptEngine.PushInt(0);
+            ScriptEngine.PushInt(control);
+            ScriptEngine.NativeCall();
+            return ScriptEngine.GetResultInt() != 0;
+        }
+
+        public static void SimulateKeyPress(int vKey)
+        {
+            if (vKey <= 0 || vKey > 255) return;
+            byte vk = (byte)vKey;
+            keybd_event(vk, 0, 0, UIntPtr.Zero);
+            keybd_event(vk, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
+        }
+
         public static void Tick()
         {
-            HandleInput();
+            HandleKeyboardInput();
+            HandleGamepadInput();
 
             if (IsOpen)
             {
@@ -55,14 +89,32 @@ namespace MiniDotNet.Core
             }
         }
 
-        private static void HandleInput()
+        private static void TriggerSelectedModMenu()
+        {
+            if (_selectedIndex < 0 || _selectedIndex >= Mods.Count) return;
+            var mod = Mods[_selectedIndex];
+
+            if (mod.OpenMenuAction != null)
+            {
+                IsOpen = false;
+                mod.OpenMenuAction.Invoke();
+            }
+            else if (mod.TriggerKey > 0)
+            {
+                IsOpen = false;
+                SimulateKeyPress(mod.TriggerKey);
+            }
+        }
+
+        private static void HandleKeyboardInput()
         {
             bool f2 = IsKeyDown(VK_F2);
             bool up = IsKeyDown(VK_UP);
             bool down = IsKeyDown(VK_DOWN);
+            bool right = IsKeyDown(VK_RIGHT);
             bool enter = IsKeyDown(VK_RETURN);
 
-            if (!f2 && !up && !down && !enter)
+            if (!f2 && !up && !down && !right && !enter)
             {
                 _keyPressed = false;
                 return;
@@ -83,7 +135,55 @@ namespace MiniDotNet.Core
                 _selectedIndex = (_selectedIndex - 1 + Mods.Count) % Mods.Count;
             else if (down)
                 _selectedIndex = (_selectedIndex + 1) % Mods.Count;
+            else if (right)
+                TriggerSelectedModMenu();
             else if (enter)
+                Mods[_selectedIndex].IsEnabled = !Mods[_selectedIndex].IsEnabled;
+        }
+        private static void HandleGamepadInput()
+        {
+            bool combo = IsControlPressed(INPUT_FRONTEND_LEFT) &&
+                         IsControlPressed(INPUT_COVER) &&
+                         IsControlPressed(INPUT_FRONTEND_ACCEPT);
+
+            if (combo)
+            {
+                if (!_padComboPressed)
+                {
+                    IsOpen = !IsOpen;
+                    _padComboPressed = true;
+                    _padNavPressed = true;
+                }
+                return;
+            }
+            else
+            {
+                _padComboPressed = false;
+            }
+
+            if (!IsOpen || Mods.Count == 0) return;
+
+            bool up = IsControlPressed(INPUT_FRONTEND_UP);
+            bool down = IsControlPressed(INPUT_FRONTEND_DOWN);
+            bool right = IsControlPressed(INPUT_FRONTEND_RIGHT);
+            bool accept = IsControlPressed(INPUT_FRONTEND_ACCEPT);
+
+            if (!up && !down && !right && !accept)
+            {
+                _padNavPressed = false;
+                return;
+            }
+
+            if (_padNavPressed) return;
+            _padNavPressed = true;
+
+            if (up)
+                _selectedIndex = (_selectedIndex - 1 + Mods.Count) % Mods.Count;
+            else if (down)
+                _selectedIndex = (_selectedIndex + 1) % Mods.Count;
+            else if (right)
+                TriggerSelectedModMenu();
+            else if (accept)
                 Mods[_selectedIndex].IsEnabled = !Mods[_selectedIndex].IsEnabled;
         }
 
@@ -92,7 +192,7 @@ namespace MiniDotNet.Core
             float menuX = 0.145f;
             float menuW = 0.225f;
             float leftTextX = menuX - (menuW / 2f) + 0.008f;
-            float rightTextX = menuX + (menuW / 2f) - 0.035f;
+            float rightTextX = menuX + (menuW / 2f) - 0.042f;
 
             float bannerY = 0.14f;
             float bannerH = 0.082f;
@@ -106,7 +206,7 @@ namespace MiniDotNet.Core
             DrawText("INSTALLED MODS", leftTextX, subY - 0.011f, 0.30f, 0, 180, 140, 255, 255);
 
             string counter = Mods.Count > 0 ? $"{_selectedIndex + 1} / {Mods.Count}" : "0 / 0";
-            DrawText(counter, rightTextX - 0.01f, subY - 0.011f, 0.30f, 0, 200, 200, 200, 255);
+            DrawText(counter, rightTextX - 0.005f, subY - 0.011f, 0.30f, 0, 200, 200, 200, 255);
 
             float startY = subY + (subH / 2f) + 0.017f;
             float itemH = 0.034f;
@@ -122,6 +222,8 @@ namespace MiniDotNet.Core
             {
                 float y = startY + (i * itemH);
                 bool selected = (i == _selectedIndex);
+                bool hasMenu = (Mods[i].OpenMenuAction != null || Mods[i].TriggerKey > 0);
+                string suffix = hasMenu ? " >>" : "";
 
                 if (selected)
                 {
@@ -129,9 +231,9 @@ namespace MiniDotNet.Core
                     DrawText(Mods[i].Name, leftTextX, y - 0.012f, 0.34f, 0, 10, 10, 10, 255);
 
                     if (Mods[i].IsEnabled)
-                        DrawText("ON", rightTextX, y - 0.012f, 0.34f, 0, 0, 160, 0, 255);
+                        DrawText("ON" + suffix, rightTextX, y - 0.012f, 0.34f, 0, 0, 160, 0, 255);
                     else
-                        DrawText("OFF", rightTextX, y - 0.012f, 0.34f, 0, 180, 0, 0, 255);
+                        DrawText("OFF" + suffix, rightTextX, y - 0.012f, 0.34f, 0, 180, 0, 0, 255);
                 }
                 else
                 {
@@ -139,15 +241,15 @@ namespace MiniDotNet.Core
                     DrawText(Mods[i].Name, leftTextX, y - 0.012f, 0.34f, 0, 240, 240, 240, 255);
 
                     if (Mods[i].IsEnabled)
-                        DrawText("ON", rightTextX, y - 0.012f, 0.34f, 0, 80, 220, 80, 255);
+                        DrawText("ON" + suffix, rightTextX, y - 0.012f, 0.34f, 0, 80, 220, 80, 255);
                     else
-                        DrawText("OFF", rightTextX, y - 0.012f, 0.34f, 0, 220, 80, 80, 255);
+                        DrawText("OFF" + suffix, rightTextX, y - 0.012f, 0.34f, 0, 220, 80, 80, 255);
                 }
             }
 
             float footerY = startY + (Mods.Count * itemH) - (itemH / 2f) + 0.014f;
             DrawRect(menuX, footerY, menuW, 0.028f, 10, 10, 10, 245);
-            DrawText("v1.0 AOT", leftTextX, footerY - 0.010f, 0.28f, 0, 150, 150, 150, 255);
+            DrawText("ENTER: Toggle | RIGHT: Open Menu", leftTextX, footerY - 0.010f, 0.26f, 0, 150, 150, 150, 255);
         }
 
         private static void DrawRect(float x, float y, float w, float h, int r, int g, int b, int a)

@@ -1,4 +1,4 @@
-name: Build GTAV MiniDotNet Loader with Mono
+name: Build GTAV MiniDotNet Full Bridge
 
 on:
   push:
@@ -23,6 +23,21 @@ jobs:
       with:
         arch: x64
 
+    - name: Setup Minimal Portable Mono Runtime + Config
+      shell: pwsh
+      run: |
+        choco install mono -y --no-progress --force
+        $monoRoot = "C:\Program Files\Mono"
+        New-Item -ItemType Directory -Force -Path "output/scripts/mono/lib/mono/4.5"
+        New-Item -ItemType Directory -Force -Path "output/scripts/mono/etc/mono/4.5"
+        Copy-Item "$monoRoot\bin\mono-2.0-sgen.dll" "output/scripts/mono/mono-2.0-sgen.dll"
+        Copy-Item "$monoRoot\etc\mono\4.5\machine.config" "output/scripts/mono/etc/mono/4.5/machine.config"
+        foreach ($dll in @("mscorlib.dll", "System.dll", "System.Core.dll", "Microsoft.CSharp.dll", "System.Drawing.dll", "System.Windows.Forms.dll", "System.Xml.dll", "System.Configuration.dll")) {
+          if (Test-Path "$monoRoot\lib\mono\4.5\$dll") {
+            Copy-Item "$monoRoot\lib\mono\4.5\$dll" "output/scripts/mono/lib/mono/4.5/"
+          }
+        }
+
     - name: Build C# AOT Core Bridge (MiniDotNet.Core.dll)
       shell: pwsh
       run: |
@@ -45,6 +60,7 @@ jobs:
         </Project>
         '@ | Set-Content "ShimProj/ScriptHookVDotNet3.csproj"
         dotnet build ShimProj/ScriptHookVDotNet3.csproj -c Release -o output/scripts
+        Remove-Item "output/scripts/*.pdb" -ErrorAction SilentlyContinue
 
     - name: Compile C++ ASI Loader (MiniDotNet.asi)
       shell: cmd
@@ -55,5 +71,5 @@ jobs:
     - name: Upload Built Mod Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: GTAV-MiniDotNet-MonoRelease
+        name: GTAV-MiniDotNet-FullBridge
         path: output/

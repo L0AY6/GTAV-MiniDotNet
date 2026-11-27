@@ -23,18 +23,14 @@ jobs:
       with:
         arch: x64
 
-    - name: Download Portable Mono Runtime (x64)
+    - name: Setup Portable Mono Runtime (x64)
       shell: pwsh
       run: |
-        Invoke-WebRequest -Uri "https://mono-project.com" -OutFile "mono.msi"
-        7z x mono.msi -omono_ext -y | Out-Null
+        choco install mono -y --no-progress
+        $monoRoot = "C:\Program Files\Mono"
         New-Item -ItemType Directory -Force -Path "output/scripts/mono"
-        $monoDll = Get-ChildItem -Path "mono_ext" -Filter "mono-2.0-sgen.dll" -Recurse | Select-Object -First 1
-        Copy-Item $monoDll.FullName "output/scripts/mono/mono-2.0-sgen.dll"
-        $libDir = Get-ChildItem -Path "mono_ext" -Filter "mscorlib.dll" -Recurse | Select-Object -First 1
-        Copy-Item -Recurse $libDir.Directory.FullName "output/scripts/mono/lib"
-        $mcsBat = Get-ChildItem -Path "mono_ext" -Filter "mcs.bat" -Recurse | Select-Object -First 1
-        Set-Content -Path "mcs_path.txt" -Value $mcsBat.FullName
+        Copy-Item "$monoRoot\bin\mono-2.0-sgen.dll" "output/scripts/mono/mono-2.0-sgen.dll"
+        Copy-Item -Recurse "$monoRoot\lib\mono\4.5" "output/scripts/mono/lib"
 
     - name: Build C# AOT Core Bridge (MiniDotNet.Core.dll)
       shell: pwsh
@@ -44,8 +40,7 @@ jobs:
     - name: Build ScriptHookVDotNet3 Mono Shim
       shell: pwsh
       run: |
-        $mcs = Get-Content "mcs_path.txt"
-        & $mcs -target:library -out:output/scripts/ScriptHookVDotNet3.dll MonoShim/ScriptHookVDotNet3.cs
+        & "C:\Program Files\Mono\bin\mcs.bat" -target:library -out:output/scripts/ScriptHookVDotNet3.dll MonoShim/ScriptHookVDotNet3.cs
 
     - name: Compile C++ ASI Loader (MiniDotNet.asi)
       shell: cmd

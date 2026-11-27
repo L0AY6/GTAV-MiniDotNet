@@ -60,11 +60,8 @@ namespace MiniDotNet.Core
             }
         }
 
-        public static void PushString(string str, out IntPtr ptr)
+        public static void PushPtr(IntPtr ptr)
         {
-            byte[] bytes = Encoding.UTF8.GetBytes(str + "\0");
-            ptr = Marshal.AllocHGlobal(bytes.Length);
-            Marshal.Copy(bytes, 0, ptr, bytes.Length);
             if (_nativePush64 != null) _nativePush64((ulong)ptr);
         }
 

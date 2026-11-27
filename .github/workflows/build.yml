@@ -23,19 +23,24 @@ jobs:
       with:
         arch: x64
 
-    - name: Setup Portable Mono Runtime (x64)
+    - name: Setup Minimal Portable Mono Runtime (x64)
       shell: pwsh
       run: |
         choco install mono -y --no-progress
         $monoRoot = "C:\Program Files\Mono"
-        New-Item -ItemType Directory -Force -Path "output/scripts/mono"
+        New-Item -ItemType Directory -Force -Path "output/scripts/mono/lib/mono/4.5"
         Copy-Item "$monoRoot\bin\mono-2.0-sgen.dll" "output/scripts/mono/mono-2.0-sgen.dll"
-        Copy-Item -Recurse "$monoRoot\lib\mono\4.5" "output/scripts/mono/lib"
+        foreach ($dll in @("mscorlib.dll", "System.dll", "System.Core.dll", "Microsoft.CSharp.dll", "System.Drawing.dll", "System.Windows.Forms.dll")) {
+          if (Test-Path "$monoRoot\lib\mono\4.5\$dll") {
+            Copy-Item "$monoRoot\lib\mono\4.5\$dll" "output/scripts/mono/lib/mono/4.5/"
+          }
+        }
 
     - name: Build C# AOT Core Bridge (MiniDotNet.Core.dll)
       shell: pwsh
       run: |
         dotnet publish CoreBridge/MiniDotNet.Core.csproj -c Release -r win-x64 -o output/scripts
+        Remove-Item "output/scripts/*.pdb" -ErrorAction SilentlyContinue
 
     - name: Build ScriptHookVDotNet3 Mono Shim
       shell: pwsh

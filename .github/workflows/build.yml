@@ -26,7 +26,7 @@ jobs:
     - name: Setup Complete Portable Mono Runtime + Compiler
       shell: pwsh
       run: |
-        choco install mono -y --no-progress --force
+        winget install -e --id Mono.Mono --accept-source-agreements --accept-package-agreements --silent
         $monoRoot = "C:\Program Files\Mono"
         New-Item -ItemType Directory -Force -Path "output/scripts/mono/lib/mono/4.5"
         New-Item -ItemType Directory -Force -Path "output/scripts/mono/etc/mono/4.5"

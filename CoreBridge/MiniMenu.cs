@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
-namespace GTA
+namespace MiniDotNet.Core
 {
     public class ModItem
     {
@@ -37,7 +37,6 @@ namespace GTA
                 DrawMenu();
             }
 
-            // تشغيل المودات المفعلة فقط
             foreach (var mod in Mods)
             {
                 if (mod.IsEnabled && mod.TickAction != null)
@@ -46,10 +45,10 @@ namespace GTA
                     {
                         mod.TickAction.Invoke();
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        // إيقاف المود تلقائياً إذا صار فيه خطأ حتى ما تكرش اللعبة
                         mod.IsEnabled = false;
+                        ScriptEngine.Log($"[Mod Error] {mod.Name} disabled: {ex.Message}");
                     }
                 }
             }
@@ -89,7 +88,6 @@ namespace GTA
 
         private static void DrawMenu()
         {
-            // خلفية العنوان
             DrawRect(0.14f, 0.08f, 0.22f, 0.045f, 15, 15, 15, 235);
             DrawText("MiniDotNet [F2]", 0.04f, 0.065f, 0.45f, 255, 200, 0, 255);
 
@@ -119,20 +117,52 @@ namespace GTA
             }
         }
 
-        // ملاحظة: استبدل Function.Call بدالة استدعاء الـ Natives الموجودة بمشروعك إذا كان اسمها مختلف
         private static void DrawRect(float x, float y, float w, float h, int r, int g, int b, int a)
         {
-            Function.Call(0x3A618A217E5154F0, x, y, w, h, r, g, b, a);
+            ScriptEngine.NativeInit(0x3A618A217E5154F0);
+            ScriptEngine.PushFloat(x);
+            ScriptEngine.PushFloat(y);
+            ScriptEngine.PushFloat(w);
+            ScriptEngine.PushFloat(h);
+            ScriptEngine.PushInt(r);
+            ScriptEngine.PushInt(g);
+            ScriptEngine.PushInt(b);
+            ScriptEngine.PushInt(a);
+            ScriptEngine.NativeCall();
         }
 
         private static void DrawText(string text, float x, float y, float scale, int r, int g, int b, int a)
         {
-            Function.Call(0x66E0276CC5F6B9DA, 0);
-            Function.Call(0x07C837F9A01C34C9, scale, scale);
-            Function.Call(0xBE6B23FFA53FB442, r, g, b, a);
-            Function.Call(0x25FBB336DF1804CB, "STRING");
-            Function.Call(0x6C188BE134E074AA, text);
-            Function.Call(0xCD015E5BB0D96A57, x, y);
+            ScriptEngine.NativeInit(0x66E0276CC5F6B9DA);
+            ScriptEngine.PushInt(0);
+            ScriptEngine.NativeCall();
+
+            ScriptEngine.NativeInit(0x07C837F9A01C34C9);
+            ScriptEngine.PushFloat(scale);
+            ScriptEngine.PushFloat(scale);
+            ScriptEngine.NativeCall();
+
+            ScriptEngine.NativeInit(0xBE6B23FFA53FB442);
+            ScriptEngine.PushInt(r);
+            ScriptEngine.PushInt(g);
+            ScriptEngine.PushInt(b);
+            ScriptEngine.PushInt(a);
+            ScriptEngine.NativeCall();
+
+            ScriptEngine.NativeInit(0x25FBB336DF1804CB);
+            ScriptEngine.PushString("STRING", out IntPtr strTypePtr);
+            ScriptEngine.NativeCall();
+            Marshal.FreeHGlobal(strTypePtr);
+
+            ScriptEngine.NativeInit(0x6C188BE134E074AA);
+            ScriptEngine.PushString(text, out IntPtr textPtr);
+            ScriptEngine.NativeCall();
+            Marshal.FreeHGlobal(textPtr);
+
+            ScriptEngine.NativeInit(0xCD015E5BB0D96A57);
+            ScriptEngine.PushFloat(x);
+            ScriptEngine.PushFloat(y);
+            ScriptEngine.NativeCall();
         }
     }
 }

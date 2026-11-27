@@ -23,23 +23,41 @@ jobs:
       with:
         arch: x64
 
-    - name: Setup Complete Portable Mono Runtime + Compiler
+    - name: Install Mono (winget, choco as fallback)
       shell: pwsh
       run: |
         winget install -e --id Mono.Mono --accept-source-agreements --accept-package-agreements --silent
-        $monoRoot = "C:\Program Files\Mono"
-        New-Item -ItemType Directory -Force -Path "output/scripts/mono/lib/mono/4.5"
-        New-Item -ItemType Directory -Force -Path "output/scripts/mono/etc/mono/4.5"
-        New-Item -ItemType Directory -Force -Path "output/scripts/mono/mini"
-        Copy-Item "$monoRoot\bin\mono-2.0-sgen.dll" "output/scripts/mono/mono-2.0-sgen.dll"
-        Copy-Item "$monoRoot\bin\mono.exe" "output/scripts/mono/mini/mono.exe"
-        Copy-Item "$monoRoot\etc\mono\4.5\machine.config" "output/scripts/mono/etc/mono/4.5/machine.config"
-        Copy-Item "$monoRoot\lib\mono\4.5\mcs.exe" "output/scripts/mono/lib/mono/4.5/mcs.exe"
-        foreach ($dll in @("mscorlib.dll", "System.dll", "System.Core.dll", "Microsoft.CSharp.dll", "System.Drawing.dll", "System.Windows.Forms.dll", "System.Xml.dll", "System.Configuration.dll", "Mono.Security.dll")) {
-          if (Test-Path "$monoRoot\lib\mono\4.5\$dll") {
-            Copy-Item "$monoRoot\lib\mono\4.5\$dll" "output/scripts/mono/lib/mono/4.5/"
-          }
+        if (-not (Test-Path "C:\Program Files\Mono\bin\mono-2.0-sgen.dll")) {
+          choco install mono -y --no-progress
         }
+        if (-not (Test-Path "C:\Program Files\Mono\bin\mono-2.0-sgen.dll")) {
+          Get-ChildItem "C:\Program Files" -ErrorAction SilentlyContinue | Out-Host
+          throw "Mono install failed: mono-2.0-sgen.dll not found"
+        }
+        $global:LASTEXITCODE = 0
+
+    - name: Stage Portable Mono Runtime + Compiler
+      shell: pwsh
+      run: |
+        $monoRoot = "C:\Program Files\Mono"
+        $dst = "output/scripts/mono"
+        New-Item -ItemType Directory -Force -Path "$dst/lib/mono/4.5/Facades" | Out-Null
+        New-Item -ItemType Directory -Force -Path "$dst/etc/mono/4.5" | Out-Null
+        New-Item -ItemType Directory -Force -Path "$dst/mini" | Out-Null
+        New-Item -ItemType Directory -Force -Path "$dst/bin" | Out-Null
+
+        Copy-Item "$monoRoot\bin\mono-2.0-sgen.dll" "$dst/mono-2.0-sgen.dll"
+        Copy-Item "$monoRoot\bin\mono-2.0-sgen.dll" "$dst/bin/mono-2.0-sgen.dll"
+        Copy-Item "$monoRoot\bin\mono.exe" "$dst/mini/mono.exe"
+        Copy-Item "$monoRoot\bin\mono.exe" "$dst/bin/mono.exe"
+        Copy-Item "$monoRoot\etc\mono\4.5\machine.config" "$dst/etc/mono/4.5/machine.config"
+        if (Test-Path "$monoRoot\etc\mono\config") { Copy-Item "$monoRoot\etc\mono\config" "$dst/etc/mono/config" }
+
+        # All framework DLLs + mcs.exe (compiler) + Facades (net48 mods reference System.Runtime etc.)
+        Copy-Item "$monoRoot\lib\mono\4.5\*.dll" "$dst/lib/mono/4.5/"
+        Copy-Item "$monoRoot\lib\mono\4.5\mcs.exe" "$dst/lib/mono/4.5/mcs.exe"
+        Copy-Item "$monoRoot\lib\mono\4.5\Facades\*.dll" "$dst/lib/mono/4.5/Facades/"
+        $global:LASTEXITCODE = 0
 
     - name: Build C# AOT Core Bridge (MiniDotNet.Core.dll)
       shell: pwsh
@@ -50,18 +68,23 @@ jobs:
     - name: Build ScriptHookVDotNet3 Mono Shim
       shell: pwsh
       run: |
-        New-Item -ItemType Directory -Force -Path "ShimProj"
+        New-Item -ItemType Directory -Force -Path "ShimProj" | Out-Null
         Copy-Item "MonoShim/ScriptHookVDotNet3.cs" "ShimProj/"
-        @'
-        <Project Sdk="Microsoft.NET.Sdk">
-          <PropertyGroup>
-            <TargetFramework>net48</TargetFramework>
-            <AssemblyName>ScriptHookVDotNet3</AssemblyName>
-            <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-            <LangVersion>latest</LangVersion>
-          </PropertyGroup>
-        </Project>
-        '@ | Set-Content "ShimProj/ScriptHookVDotNet3.csproj"
+        $proj = @(
+          '<Project Sdk="Microsoft.NET.Sdk">',
+          '  <PropertyGroup>',
+          '    <TargetFramework>net48</TargetFramework>',
+          '    <AssemblyName>ScriptHookVDotNet3</AssemblyName>',
+          '    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>',
+          '    <LangVersion>latest</LangVersion>',
+          '  </PropertyGroup>',
+          '  <ItemGroup>',
+          '    <Reference Include="System.Windows.Forms" />',
+          '    <Reference Include="System.Drawing" />',
+          '  </ItemGroup>',
+          '</Project>'
+        )
+        Set-Content -Path "ShimProj/ScriptHookVDotNet3.csproj" -Value $proj
         dotnet build ShimProj/ScriptHookVDotNet3.csproj -c Release -o output/scripts
         Remove-Item "output/scripts/*.pdb" -ErrorAction SilentlyContinue
 
@@ -70,6 +93,14 @@ jobs:
       run: |
         if not exist output mkdir output
         cl /LD /EHsc /O2 /MT /std:c++17 Loader\dllmain.cpp /Fe:output\MiniDotNet.asi user32.lib
+
+    - name: Diagnostic switch + cleanup
+      shell: pwsh
+      run: |
+        Remove-Item "output/*.lib", "output/*.exp" -ErrorAction SilentlyContinue
+        # While we debug the crash the Mono bridge starts DISABLED. Delete this file in the game's scripts folder to enable it.
+        Set-Content -Path "output/scripts/MiniDotNet.nomono" -Value "Delete this file to enable the Mono bridge."
+        $global:LASTEXITCODE = 0
 
     - name: Upload Built Mod Artifacts
       uses: actions/upload-artifact@v4

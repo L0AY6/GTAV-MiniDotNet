@@ -54,7 +54,7 @@ namespace GTA.Native
         private static int _idx = 0;
         private static IntPtr[] InitRing()
         {
-            var a = new IntPtr[64];
+            var a = new IntPtr;
             for (int i = 0; i < 64; i++) a[i] = Marshal.AllocHGlobal(256);
             return a;
         }
@@ -99,7 +99,7 @@ namespace GTA.Native
             if (typeof(T) == typeof(bool)) return (T)(object)(res != 0);
             if (typeof(T) == typeof(float)) { float f = *(float*)&res; return (T)(object)f; }
             if (typeof(T) == typeof(string)) return (T)(object)(Marshal.PtrToStringAnsi((IntPtr)res) ?? "");
-            return default;
+            return default(T);
         }
     }
 }

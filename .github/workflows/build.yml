@@ -45,7 +45,7 @@ jobs:
     - name: Build ScriptHookVDotNet3 Mono Shim
       shell: pwsh
       run: |
-        & "C:\Program Files\Mono\bin\mcs.bat" -target:library -out:output/scripts/ScriptHookVDotNet3.dll MonoShim/ScriptHookVDotNet3.cs
+        & "C:\Program Files\Mono\bin\mcs.bat" -unsafe -target:library -out:output/scripts/ScriptHookVDotNet3.dll MonoShim/ScriptHookVDotNet3.cs
 
     - name: Compile C++ ASI Loader (MiniDotNet.asi)
       shell: cmd

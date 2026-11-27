@@ -24,6 +24,19 @@ tick_fn g_CoreTick = nullptr;
 tick_fn* g_ModTicks = nullptr;
 int g_ModCount = 0;
 
+typedef void* (*mono_jit_init_t)(const char* file);
+typedef void (*mono_set_dirs_t)(const char* assembly_dir, const char* config_dir);
+typedef void* (*mono_domain_assembly_open_t)(void* domain, const char* name);
+typedef void* (*mono_assembly_get_image_t)(void* assembly);
+typedef void* (*mono_class_from_name_t)(void* image, const char* name_space, const char* name);
+typedef void* (*mono_class_get_method_from_name_t)(void* klass, const char* name, int param_count);
+typedef void* (*mono_runtime_invoke_t)(void* method, void* obj, void** params, void** exc);
+
+mono_runtime_invoke_t pMonoInvoke = nullptr;
+void* g_MonoTickMethod = nullptr;
+bool g_MonoReady = false;
+int g_MonoWait = 0;
+
 void LogMessage(const char* msg) {
     HANDLE hFile = CreateFileA("MiniDotNet.log", FILE_APPEND_DATA, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hFile != INVALID_HANDLE_VALUE) {
@@ -31,6 +44,67 @@ void LogMessage(const char* msg) {
         WriteFile(hFile, msg, (DWORD)lstrlenA(msg), &written, NULL);
         WriteFile(hFile, "\r\n", 2, &written, NULL);
         CloseHandle(hFile);
+    }
+}
+
+extern "C" __declspec(dllexport) void __cdecl BridgeNativeInit(uint64_t hash) {
+    if (pNativeInit) pNativeInit(hash);
+}
+extern "C" __declspec(dllexport) void __cdecl BridgeNativePush64(uint64_t val) {
+    if (pNativePush64) pNativePush64(val);
+}
+extern "C" __declspec(dllexport) uint64_t __cdecl BridgeNativeCall() {
+    if (!pNativeCall) return 0;
+    uint64_t* res = pNativeCall();
+    return res ? *res : 0;
+}
+extern "C" __declspec(dllexport) BYTE* __cdecl BridgeGetEntityAddr(int handle) {
+    return pGetEntityAddr ? pGetEntityAddr(handle) : nullptr;
+}
+extern "C" __declspec(dllexport) int __cdecl BridgeGetAllVeh(int* arr, int arrSize) {
+    return pWorldGetAllVeh ? pWorldGetAllVeh(arr, arrSize) : 0;
+}
+
+void InitMonoBridge(const char* baseDir) {
+    char monoDllPath, libDir, shimPath;
+    sprintf_s(monoDllPath, MAX_PATH, "%s\\scripts\\mono\\mono-2.0-sgen.dll", baseDir);
+    sprintf_s(libDir, MAX_PATH, "%s\\scripts\\mono\\lib", baseDir);
+    sprintf_s(shimPath, MAX_PATH, "%s\\scripts\\ScriptHookVDotNet3.dll", baseDir);
+
+    HMODULE hMono = LoadLibraryA(monoDllPath);
+    if (!hMono) {
+        LogMessage("[Mono] mono-2.0-sgen.dll not found, skipping Mono bridge.");
+        return;
+    }
+
+    auto pSetDirs = (mono_set_dirs_t)GetProcAddress(hMono, "mono_set_dirs");
+    auto pJitInit = (mono_jit_init_t)GetProcAddress(hMono, "mono_jit_init_version");
+    auto pAsmOpen = (mono_domain_assembly_open_t)GetProcAddress(hMono, "mono_domain_assembly_open");
+    auto pGetImage = (mono_assembly_get_image_t)GetProcAddress(hMono, "mono_assembly_get_image");
+    auto pClassFromName = (mono_class_from_name_t)GetProcAddress(hMono, "mono_class_from_name");
+    auto pGetMethod = (mono_class_get_method_from_name_t)GetProcAddress(hMono, "mono_class_get_method_from_name");
+    pMonoInvoke = (mono_runtime_invoke_t)GetProcAddress(hMono, "mono_runtime_invoke");
+
+    if (!pJitInit || !pAsmOpen || !pGetImage || !pClassFromName || !pGetMethod || !pMonoInvoke) return;
+
+    if (pSetDirs) pSetDirs(libDir, libDir);
+    void* domain = pJitInit("MiniDotNetDomain", "v4.0.30319");
+    if (!domain) return;
+
+    void* asmShim = pAsmOpen(domain, shimPath);
+    if (!asmShim) {
+        LogMessage("[Mono] Failed to open ScriptHookVDotNet3.dll");
+        return;
+    }
+
+    void* img = pGetImage(asmShim);
+    void* klass = pClassFromName(img, "GTA", "MonoBridgeHost");
+    if (klass) {
+        g_MonoTickMethod = pGetMethod(klass, "TickAll", 0);
+        if (g_MonoTickMethod) {
+            g_MonoReady = true;
+            LogMessage("[SUCCESS] Mono Runtime & ScriptHookVDotNet3 Bridge Active!");
+        }
     }
 }
 
@@ -89,11 +163,24 @@ void LoadAllPlugins() {
 
 void ScriptMain() {
     LoadAllPlugins();
+
+    char ansiDir;
+    GetCurrentDirectoryA(MAX_PATH, ansiDir);
+
     while (true) {
         if (g_CoreTick) g_CoreTick();
         for (int i = 0; i < g_ModCount; i++) {
             if (g_ModTicks[i]) g_ModTicks[i]();
         }
+
+        if (!g_MonoReady) {
+            g_MonoWait++;
+            if (g_MonoWait == 200) InitMonoBridge(ansiDir);
+        } else if (g_MonoTickMethod && pMonoInvoke) {
+            void* exc = nullptr;
+            pMonoInvoke(g_MonoTickMethod, nullptr, nullptr, &exc);
+        }
+
         if (pScriptWait) pScriptWait(0);
         else Sleep(16);
     }
